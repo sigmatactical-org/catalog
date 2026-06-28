@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Sigma Catalog{% endblock %}
+
+{% block brand %}Sigma Catalog{% endblock %}
+
+{% block main_class %}catalog-main{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+      <h1 class="mb-1">Catalog</h1>
+      <p class="text-secondary mb-0">Simple SKUs and composite items (kits and bundles).</p>
+    </div>
+    <a class="btn btn-primary" href="/skus/new">Add SKU</a>
+  </div>
+
+  {% if let Some(msg) = message %}
+  <div class="alert alert-info" role="status">{{ msg }}</div>
+  {% endif %}
+
+  {% if skus.is_empty() %}
+  <p class="text-secondary">No SKUs yet. Add a simple item first, then build composite items from it.</p>
+  {% else %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>SKU</th>
+          <th>Name</th>
+          <th>Kind</th>
+          <th>Category</th>
+          <th>Components</th>
+          <th>Active</th>
+          <th>Updated</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in skus %}
+        <tr>
+          <td><code>{{ row.sku.sku_code }}</code></td>
+          <td>{{ row.sku.name }}</td>
+          <td>{{ row.kind_label }}</td>
+          <td>{% if let Some(category) = row.sku.category.as_ref() %}{{ category }}{% else %}<span class="text-secondary">—</span>{% endif %}</td>
+          <td>{% if row.components_summary.is_empty() %}<span class="text-secondary">—</span>{% else %}{{ row.components_summary }}{% endif %}</td>
+          <td>{% if row.sku.active %}<span class="text-success">Yes</span>{% else %}<span class="text-secondary">No</span>{% endif %}</td>
+          <td class="text-secondary"><small>{{ row.sku.updated_at }}</small></td>
+          <td class="text-nowrap">
+            <a class="btn btn-sm btn-outline-primary" href="/skus/{{ row.sku.id }}/edit">Edit</a>
+            <form method="post" action="/skus/{{ row.sku.id }}/delete" class="d-inline" onsubmit="return confirm('Delete this SKU?');">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <section class="mt-5">
+    <h2 class="h5">JSON API</h2>
+    <ul class="small text-secondary">
+      <li><code>GET /skus</code> — list SKUs</li>
+      <li><code>GET /skus/{id}</code> — get one SKU (includes full component structure)</li>
+      <li><code>POST /skus</code> — create SKU (JSON body)</li>
+      <li><code>PUT /skus/{id}</code> — update SKU</li>
+      <li><code>DELETE /skus/{id}</code> — delete SKU</li>
+    </ul>
+    <p class="small text-secondary mb-0">
+      Composite SKUs include a <code>components</code> array of <code>{ "sku_id", "quantity" }</code> objects.
+      Simple SKUs must have an empty <code>components</code> array.
+    </p>
+  </section>
+</div>
+{% endblock %}
