@@ -88,6 +88,14 @@ Browser clients call `/api/skus` on the identity host (with session + CSRF); ide
 cargo run -p sigma-catalog
 ```
 
+From the sigma workspace:
+
+```bash
+cd commerce/catalog && ./scripts/prepare-local.sh && cargo run -p sigma-catalog
+# or prepare all commerce services:
+(cd commerce && ./scripts/prepare-local.sh)
+```
+
 Open http://localhost:8080
 
 ## Docker
