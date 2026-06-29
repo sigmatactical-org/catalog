@@ -1,2 +1,0 @@
-[patch."https://github.com/sigmatactical-org/sigma-theme.git"]
-sigma-theme = { path = "../theme" }
