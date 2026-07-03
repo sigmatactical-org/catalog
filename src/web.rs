@@ -62,7 +62,7 @@ fn create_sku_form(
             let skus = store.list();
             let values = form_to_values(&form);
             let response = match form.into_create() {
-                Ok(input) => match store.create(input) {
+                Ok(input) => match store.create(input).await {
                     Ok(_) => {
                         warp::redirect::redirect(warp::http::Uri::from_static("/")).into_response()
                     }
@@ -103,7 +103,7 @@ fn update_sku_form(
             let skus = store.list();
             let values = form_to_values(&form);
             let response = match form.into_update() {
-                Ok(input) => match store.update(&id, input) {
+                Ok(input) => match store.update(&id, input).await {
                     Ok(_) => {
                         warp::redirect::redirect(warp::http::Uri::from_static("/")).into_response()
                     }
@@ -129,7 +129,7 @@ fn delete_sku_form(
         .and(store)
         .and_then(|id: String, store: SharedStore| async move {
             let mut store = store.lock().await;
-            match store.delete(&id) {
+            match store.delete(&id).await {
                 Ok(()) => {
                     Ok(warp::redirect::redirect(warp::http::Uri::from_static("/")).into_response())
                 }
@@ -156,10 +156,7 @@ fn form_to_values(form: &SkuForm) -> FormValues {
 }
 
 fn invalid_input(message: String) -> StoreError {
-    StoreError::Io(std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        message,
-    ))
+    StoreError::InvalidInput(message)
 }
 
 fn render_form_error(

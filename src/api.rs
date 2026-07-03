@@ -36,7 +36,8 @@ fn store_error_status(err: &StoreError) -> StatusCode {
         | StoreError::SelfReference
         | StoreError::CycleDetected => StatusCode::BAD_REQUEST,
         StoreError::ReferencedByComposite(_) => StatusCode::CONFLICT,
-        StoreError::Io(_) | StoreError::Json(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        StoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
+        StoreError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -89,7 +90,7 @@ fn create_sku(
         .and(store)
         .and_then(|input: CreateSku, store: SharedStore| async move {
             let mut store = store.lock().await;
-            let response = match store.create(input) {
+            let response = match store.create(input).await {
                 Ok(sku) => warp::reply::with_status(warp::reply::json(&sku), StatusCode::CREATED)
                     .into_response(),
                 Err(e) => json_error(store_error_status(&e), e.to_string()),
@@ -109,7 +110,7 @@ fn update_sku(
         .and_then(
             |id: String, input: UpdateSku, store: SharedStore| async move {
                 let mut store = store.lock().await;
-                let response = match store.update(&id, input) {
+                let response = match store.update(&id, input).await {
                     Ok(sku) => warp::reply::json(&sku).into_response(),
                     Err(StoreError::NotFound) => return Err(warp::reject::not_found()),
                     Err(e) => json_error(store_error_status(&e), e.to_string()),
@@ -128,7 +129,7 @@ fn delete_sku(
         .and(store)
         .and_then(|id: String, store: SharedStore| async move {
             let mut store = store.lock().await;
-            let response = match store.delete(&id) {
+            let response = match store.delete(&id).await {
                 Ok(()) => {
                     warp::reply::with_status(warp::reply(), StatusCode::NO_CONTENT).into_response()
                 }

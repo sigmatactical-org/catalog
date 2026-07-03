@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
 
+use sqlx::PgPool;
 use thiserror::Error;
 
 use crate::model::{CreateSku, Sku, SkuComponent, SkuKind, UpdateSku};
+
+const SCHEMA: &str = "catalog";
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -29,10 +31,10 @@ pub enum StoreError {
     CycleDetected,
     #[error("sku is referenced by composite sku(s): {0}")]
     ReferencedByComposite(String),
+    #[error("database error: {0}")]
+    Database(#[from] anyhow::Error),
     #[error("{0}")]
-    Io(#[from] std::io::Error),
-    #[error("{0}")]
-    Json(#[from] serde_json::Error),
+    InvalidInput(String),
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -42,32 +44,29 @@ struct Database {
 
 #[derive(Debug, Clone)]
 pub struct CatalogStore {
-    path: PathBuf,
+    pool: PgPool,
     db: Database,
 }
 
 impl CatalogStore {
-    /// Load or initialize the catalog database at `path`.
-    pub fn load(path: impl AsRef<Path>) -> Result<Self, StoreError> {
-        let path = path.as_ref().to_path_buf();
-        let db = if path.exists() {
-            let bytes = std::fs::read(&path)?;
-            serde_json::from_slice(&bytes)?
-        } else {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            Database::default()
-        };
-        Ok(Self { path, db })
+    /// Connect to PostgreSQL and load the catalog snapshot.
+    pub async fn connect() -> Result<Self, StoreError> {
+        let pool = sigma_pg::connect().await?;
+        let db: Database = sigma_pg::load_snapshot(&pool, SCHEMA).await?;
+        Ok(Self { pool, db })
     }
 
-    fn save(&self) -> Result<(), StoreError> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let bytes = serde_json::to_vec_pretty(&self.db)?;
-        std::fs::write(&self.path, bytes)?;
+    /// Reset the catalog snapshot (tests only).
+    #[cfg(test)]
+    pub async fn connect_empty() -> Result<Self, StoreError> {
+        let pool = sigma_pg::connect().await?;
+        let db = Database::default();
+        sigma_pg::save_snapshot(&pool, SCHEMA, &db).await?;
+        Ok(Self { pool, db })
+    }
+
+    async fn persist(&self) -> Result<(), StoreError> {
+        sigma_pg::save_snapshot(&self.pool, SCHEMA, &self.db).await?;
         Ok(())
     }
 
@@ -83,15 +82,15 @@ impl CatalogStore {
         self.db.skus.iter().find(|s| s.id == id).cloned()
     }
 
-    pub fn create(&mut self, input: CreateSku) -> Result<Sku, StoreError> {
+    pub async fn create(&mut self, input: CreateSku) -> Result<Sku, StoreError> {
         self.validate_create(&input)?;
         let sku = Sku::new(input);
         self.db.skus.push(sku.clone());
-        self.save()?;
+        self.persist().await?;
         Ok(sku)
     }
 
-    pub fn update(&mut self, id: &str, input: UpdateSku) -> Result<Sku, StoreError> {
+    pub async fn update(&mut self, id: &str, input: UpdateSku) -> Result<Sku, StoreError> {
         self.validate_update(id, &input)?;
         let sku = self
             .db
@@ -101,11 +100,11 @@ impl CatalogStore {
             .ok_or(StoreError::NotFound)?;
         sku.apply_update(input);
         let updated = sku.clone();
-        self.save()?;
+        self.persist().await?;
         Ok(updated)
     }
 
-    pub fn delete(&mut self, id: &str) -> Result<(), StoreError> {
+    pub async fn delete(&mut self, id: &str) -> Result<(), StoreError> {
         let index = self
             .db
             .skus
@@ -126,7 +125,7 @@ impl CatalogStore {
         }
 
         self.db.skus.remove(index);
-        self.save()
+        self.persist().await
     }
 
     fn validate_create(&self, input: &CreateSku) -> Result<(), StoreError> {
@@ -261,17 +260,14 @@ fn dfs_contains(
 mod tests {
     use super::*;
     use crate::model::SkuComponent;
-    use tempfile::TempDir;
 
-    fn test_store() -> (CatalogStore, TempDir) {
-        let dir = TempDir::new().unwrap();
-        let store = CatalogStore::load(dir.path().join("catalog.json")).unwrap();
-        (store, dir)
+    async fn test_store() -> CatalogStore {
+        CatalogStore::connect_empty().await.expect("PostgreSQL required for tests")
     }
 
-    #[test]
-    fn create_simple_sku() {
-        let (mut store, _dir) = test_store();
+    #[tokio::test]
+    async fn create_simple_sku() {
+        let mut store = test_store();
         let sku = store
             .create(CreateSku {
                 sku_code: "WIDGET-01".to_string(),
@@ -282,14 +278,15 @@ mod tests {
                 active: Some(true),
                 components: vec![],
             })
+            .await
             .unwrap();
         assert_eq!(sku.sku_code, "WIDGET-01");
         assert_eq!(sku.kind, SkuKind::Simple);
     }
 
-    #[test]
-    fn create_composite_sku() {
-        let (mut store, _dir) = test_store();
+    #[tokio::test]
+    async fn create_composite_sku() {
+        let mut store = test_store();
         let part = store
             .create(CreateSku {
                 sku_code: "PART-A".to_string(),
@@ -300,6 +297,7 @@ mod tests {
                 active: Some(true),
                 components: vec![],
             })
+            .await
             .unwrap();
         let kit = store
             .create(CreateSku {
@@ -314,14 +312,15 @@ mod tests {
                     quantity: 2,
                 }],
             })
+            .await
             .unwrap();
         assert_eq!(kit.components.len(), 1);
         assert_eq!(kit.components[0].quantity, 2);
     }
 
-    #[test]
-    fn reject_composite_self_reference() {
-        let (mut store, _dir) = test_store();
+    #[tokio::test]
+    async fn reject_composite_self_reference() {
+        let mut store = test_store();
         let part = store
             .create(CreateSku {
                 sku_code: "PART-B".to_string(),
@@ -332,6 +331,7 @@ mod tests {
                 active: Some(true),
                 components: vec![],
             })
+            .await
             .unwrap();
         let kit = store
             .create(CreateSku {
@@ -346,6 +346,7 @@ mod tests {
                     quantity: 1,
                 }],
             })
+            .await
             .unwrap();
         let err = store
             .update(
@@ -363,6 +364,7 @@ mod tests {
                     }],
                 },
             )
+            .await
             .unwrap_err();
         assert!(matches!(err, StoreError::SelfReference));
     }

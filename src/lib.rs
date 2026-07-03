@@ -66,12 +66,12 @@ pub fn routes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use warp::http::StatusCode;
 
-    fn test_store() -> store::CatalogStore {
-        let dir = TempDir::new().unwrap();
-        store::CatalogStore::load(dir.path().join("catalog.json")).unwrap()
+    async fn test_store() -> store::CatalogStore {
+        store::CatalogStore::connect_empty()
+            .await
+            .expect("PostgreSQL required for tests")
     }
 
     #[tokio::test]
@@ -79,7 +79,7 @@ mod tests {
         let res = warp::test::request()
             .method("GET")
             .path("/up")
-            .reply(&routes(test_store()))
+            .reply(&routes(test_store().await))
             .await;
         assert_eq!(res.status(), StatusCode::OK);
     }
@@ -89,7 +89,7 @@ mod tests {
         let res = warp::test::request()
             .method("GET")
             .path("/")
-            .reply(&routes(test_store()))
+            .reply(&routes(test_store().await))
             .await;
         assert_eq!(res.status(), StatusCode::OK);
         let body = std::str::from_utf8(res.body()).unwrap();
@@ -102,7 +102,7 @@ mod tests {
             .method("GET")
             .path("/skus")
             .header("accept", "application/json")
-            .reply(&routes(test_store()))
+            .reply(&routes(test_store().await))
             .await;
         assert_eq!(res.status(), StatusCode::OK);
         let body: Vec<Sku> = serde_json::from_slice(res.body()).unwrap();
@@ -118,7 +118,7 @@ mod tests {
             .body(
                 r#"{"sku_code":"WIDGET-01","name":"Widget","description":null,"category":"parts","kind":"simple","active":true,"components":[]}"#,
             )
-            .reply(&routes(test_store()))
+            .reply(&routes(test_store().await))
             .await;
         assert_eq!(res.status(), StatusCode::CREATED);
         let sku: Sku = serde_json::from_slice(res.body()).unwrap();
@@ -128,7 +128,7 @@ mod tests {
 
     #[tokio::test]
     async fn api_create_composite_sku() {
-        let store = test_store();
+        let store = test_store().await;
         let app = routes(store);
 
         let part_res = warp::test::request()

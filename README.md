@@ -20,7 +20,7 @@ Shared site chrome comes from [sigma-theme](https://github.com/sigmatactical-org
 | Variable | Purpose |
 |----------|---------|
 | `PORT` | Listen port (default `8080`) |
-| `CATALOG_DATA_PATH` | JSON database path (default `data/catalog.json`) |
+| `DATABASE_URL` | PostgreSQL connection URL (default `postgres://sigma:sigma@127.0.0.1:5432/sigma`) |
 
 ## Data model
 
@@ -109,7 +109,12 @@ Release is in **`.github/workflows/release.yml`** when configured. Locally:
 docker build -f Dockerfile build/image
 ```
 
-Mount a volume at `/app/data` (or set `CATALOG_DATA_PATH`) so catalog data persists across restarts.
+Data is stored in the shared PostgreSQL `catalog` schema (`catalog.snapshot` JSONB table). Start Postgres from [sigma-pg](https://github.com/sigmatactical-org/sigma-pg):
+
+```bash
+git clone https://github.com/sigmatactical-org/sigma-pg
+cd sigma-pg && docker compose -f docker-compose.deps.yml up -d
+```
 
 ## License
 
