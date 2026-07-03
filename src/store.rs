@@ -262,12 +262,14 @@ mod tests {
     use crate::model::SkuComponent;
 
     async fn test_store() -> CatalogStore {
-        CatalogStore::connect_empty().await.expect("PostgreSQL required for tests")
+        CatalogStore::connect_empty()
+            .await
+            .expect("PostgreSQL required for tests")
     }
 
     #[tokio::test]
     async fn create_simple_sku() {
-        let mut store = test_store();
+        let mut store = test_store().await;
         let sku = store
             .create(CreateSku {
                 sku_code: "WIDGET-01".to_string(),
@@ -286,7 +288,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_composite_sku() {
-        let mut store = test_store();
+        let mut store = test_store().await;
         let part = store
             .create(CreateSku {
                 sku_code: "PART-A".to_string(),
@@ -320,7 +322,7 @@ mod tests {
 
     #[tokio::test]
     async fn reject_composite_self_reference() {
-        let mut store = test_store();
+        let mut store = test_store().await;
         let part = store
             .create(CreateSku {
                 sku_code: "PART-B".to_string(),
