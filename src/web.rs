@@ -148,10 +148,7 @@ fn delete_sku_form(
                 }
                 Err(StoreError::NotFound) => Err(warp::reject::not_found()),
                 Err(e) => {
-                    let skus = store
-                        .list()
-                        .await
-                        .map_err(|_| warp::reject::not_found())?;
+                    let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
                     templates::render_index_html(skus, Some(format!("Delete failed: {e}")))
                         .map(|html| warp::reply::html(html).into_response())
                         .map_err(|_| warp::reject::not_found())
