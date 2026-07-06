@@ -93,9 +93,9 @@ cargo run -p sigma-catalog
 From the sigma workspace:
 
 ```bash
-cd sigma/commerce/catalog && ./scripts/prepare-local.sh && cargo run -p sigma-catalog
+cd sigma/it/commerce/catalog && ./scripts/prepare-local.sh && cargo run -p sigma-catalog
 # or prepare all commerce services:
-(cd sigma/commerce && ./scripts/prepare-local.sh)
+(cd sigma/it/commerce && ./scripts/prepare-local.sh)
 ```
 
 Open http://localhost:8080
