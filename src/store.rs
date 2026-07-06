@@ -62,6 +62,11 @@ impl CatalogStore {
         Ok(store)
     }
 
+    #[must_use]
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     pub async fn list(&self) -> Result<Vec<Sku>, StoreError> {
         let rows = sqlx::query(
             "SELECT id, sku_code, name, description, category, kind, active, updated_at \
