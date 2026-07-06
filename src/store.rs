@@ -49,7 +49,7 @@ pub struct CatalogStore {
 
 impl CatalogStore {
     pub async fn connect() -> Result<Self, StoreError> {
-        let pool = sigma_pg::connect().await?;
+        let pool = sigma_pg::connect_as("catalog").await?;
         Ok(Self { pool })
     }
 
@@ -89,7 +89,7 @@ impl CatalogStore {
         }
     }
 
-    pub async fn create(&mut self, input: CreateSku) -> Result<Sku, StoreError> {
+    pub async fn create(&self, input: CreateSku) -> Result<Sku, StoreError> {
         self.validate_create(&input).await?;
         let sku = Sku::new(input);
         let mut tx = self.pool.begin().await?;
@@ -99,7 +99,7 @@ impl CatalogStore {
         Ok(sku)
     }
 
-    pub async fn update(&mut self, id: &str, input: UpdateSku) -> Result<Sku, StoreError> {
+    pub async fn update(&self, id: &str, input: UpdateSku) -> Result<Sku, StoreError> {
         self.validate_update(id, &input).await?;
         let mut sku = self.get(id).await?.ok_or(StoreError::NotFound)?;
         sku.apply_update(input);
@@ -123,7 +123,7 @@ impl CatalogStore {
         Ok(sku)
     }
 
-    pub async fn delete(&mut self, id: &str) -> Result<(), StoreError> {
+    pub async fn delete(&self, id: &str) -> Result<(), StoreError> {
         if self.get(id).await?.is_none() {
             return Err(StoreError::NotFound);
         }
@@ -416,7 +416,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_simple_sku() {
-        let mut store = test_store().await;
+        let store = test_store().await;
         let sku = store
             .create(CreateSku {
                 sku_code: "WIDGET-01".to_string(),
@@ -435,7 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_composite_sku() {
-        let mut store = test_store().await;
+        let store = test_store().await;
         let part = store
             .create(CreateSku {
                 sku_code: "PART-A".to_string(),
@@ -469,7 +469,7 @@ mod tests {
 
     #[tokio::test]
     async fn reject_composite_self_reference() {
-        let mut store = test_store().await;
+        let store = test_store().await;
         let part = store
             .create(CreateSku {
                 sku_code: "PART-B".to_string(),

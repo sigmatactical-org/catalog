@@ -26,7 +26,6 @@ fn index_page(
         .and(warp::get())
         .and(store)
         .and_then(|store: SharedStore| async move {
-            let store = store.lock().await;
             let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
             templates::render_index_html(skus, None)
                 .map(warp::reply::html)
@@ -43,7 +42,6 @@ fn new_sku_page(
         .and(warp::get())
         .and(store)
         .and_then(|store: SharedStore| async move {
-            let store = store.lock().await;
             let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
             templates::render_form_html(skus, None, None)
                 .map(warp::reply::html)
@@ -60,7 +58,6 @@ fn create_sku_form(
         .and(warp::body::form())
         .and(store)
         .and_then(|form: SkuForm, store: SharedStore| async move {
-            let mut store = store.lock().await;
             let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
             let values = form_to_values(&form);
             let response = match form.into_create() {
@@ -83,7 +80,6 @@ fn edit_sku_page(
         .and(warp::get())
         .and(store)
         .and_then(|id: String, store: SharedStore| async move {
-            let store = store.lock().await;
             let Some(sku) = store
                 .get(&id)
                 .await
@@ -106,7 +102,6 @@ fn update_sku_form(
         .and(warp::body::form())
         .and(store)
         .and_then(|id: String, form: SkuForm, store: SharedStore| async move {
-            let mut store = store.lock().await;
             let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
             let values = form_to_values(&form);
             let response = match form.into_update() {
@@ -141,7 +136,6 @@ fn delete_sku_form(
         .and(warp::post())
         .and(store)
         .and_then(|id: String, store: SharedStore| async move {
-            let mut store = store.lock().await;
             match store.delete(&id).await {
                 Ok(()) => {
                     Ok(warp::redirect::redirect(warp::http::Uri::from_static("/")).into_response())
