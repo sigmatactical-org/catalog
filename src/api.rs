@@ -41,8 +41,8 @@ fn store_error_status(err: &StoreError) -> StatusCode {
     }
 }
 
-fn internal_auth(
-) -> impl Filter<Extract = (Option<String>, Option<String>), Error = Rejection> + Clone {
+fn internal_auth()
+-> impl Filter<Extract = (Option<String>, Option<String>), Error = Rejection> + Clone {
     warp::header::optional::<String>("authorization")
         .and(warp::header::optional::<String>("x-sigma-internal-token"))
 }
@@ -124,8 +124,10 @@ fn create_sku(
             |input: CreateSku, authorization, internal_token, store: SharedStore| async move {
                 ensure_internal(authorization, internal_token)?;
                 let response = match store.create(input).await {
-                    Ok(sku) => warp::reply::with_status(warp::reply::json(&sku), StatusCode::CREATED)
-                        .into_response(),
+                    Ok(sku) => {
+                        warp::reply::with_status(warp::reply::json(&sku), StatusCode::CREATED)
+                            .into_response()
+                    }
                     Err(e) => json_error(store_error_status(&e), e.to_string()),
                 };
                 Ok::<_, Rejection>(response)
@@ -167,9 +169,8 @@ fn delete_sku(
             |id: String, authorization, internal_token, store: SharedStore| async move {
                 ensure_internal(authorization, internal_token)?;
                 let response = match store.delete(&id).await {
-                    Ok(()) => {
-                        warp::reply::with_status(warp::reply(), StatusCode::NO_CONTENT).into_response()
-                    }
+                    Ok(()) => warp::reply::with_status(warp::reply(), StatusCode::NO_CONTENT)
+                        .into_response(),
                     Err(StoreError::NotFound) => return Err(warp::reject::not_found()),
                     Err(e) => json_error(store_error_status(&e), e.to_string()),
                 };
