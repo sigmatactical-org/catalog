@@ -59,7 +59,8 @@ fn list_skus(
         .and(warp::get())
         .and(store)
         .and_then(|store: SharedStore| async move {
-            let skus = store.lock().await.list();
+            let store = store.lock().await;
+            let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
             Ok::<_, Rejection>(warp::reply::json(&skus))
         })
 }
@@ -73,7 +74,7 @@ fn get_sku(
         .and(store)
         .and_then(|id: String, store: SharedStore| async move {
             let store = store.lock().await;
-            match store.get(&id) {
+            match store.get(&id).await.map_err(|_| warp::reject::not_found())? {
                 Some(sku) => Ok(warp::reply::json(&sku)),
                 None => Err(warp::reject::not_found()),
             }

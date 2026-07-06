@@ -27,7 +27,8 @@ fn index_page(
         .and(store)
         .and_then(|store: SharedStore| async move {
             let store = store.lock().await;
-            templates::render_index_html(store.list(), None)
+            let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
+            templates::render_index_html(skus, None)
                 .map(warp::reply::html)
                 .map_err(|_| warp::reject::not_found())
         })
@@ -43,7 +44,8 @@ fn new_sku_page(
         .and(store)
         .and_then(|store: SharedStore| async move {
             let store = store.lock().await;
-            templates::render_form_html(store.list(), None, None)
+            let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
+            templates::render_form_html(skus, None, None)
                 .map(warp::reply::html)
                 .map_err(|_| warp::reject::not_found())
         })
@@ -59,7 +61,7 @@ fn create_sku_form(
         .and(store)
         .and_then(|form: SkuForm, store: SharedStore| async move {
             let mut store = store.lock().await;
-            let skus = store.list();
+            let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
             let values = form_to_values(&form);
             let response = match form.into_create() {
                 Ok(input) => match store.create(input).await {
@@ -82,10 +84,15 @@ fn edit_sku_page(
         .and(store)
         .and_then(|id: String, store: SharedStore| async move {
             let store = store.lock().await;
-            let Some(sku) = store.get(&id) else {
+            let Some(sku) = store
+                .get(&id)
+                .await
+                .map_err(|_| warp::reject::not_found())?
+            else {
                 return Err(warp::reject::not_found());
             };
-            templates::render_form_html(store.list(), Some(sku), None)
+            let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
+            templates::render_form_html(skus, Some(sku), None)
                 .map(warp::reply::html)
                 .map_err(|_| warp::reject::not_found())
         })
@@ -100,7 +107,7 @@ fn update_sku_form(
         .and(store)
         .and_then(|id: String, form: SkuForm, store: SharedStore| async move {
             let mut store = store.lock().await;
-            let skus = store.list();
+            let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
             let values = form_to_values(&form);
             let response = match form.into_update() {
                 Ok(input) => match store.update(&id, input).await {
@@ -108,12 +115,18 @@ fn update_sku_form(
                         warp::redirect::redirect(warp::http::Uri::from_static("/")).into_response()
                     }
                     Err(e) => {
-                        let sku = store.get(&id);
+                        let sku = store
+                            .get(&id)
+                            .await
+                            .map_err(|_| warp::reject::not_found())?;
                         render_form_error(skus, sku, values, e)
                     }
                 },
                 Err(e) => {
-                    let sku = store.get(&id);
+                    let sku = store
+                        .get(&id)
+                        .await
+                        .map_err(|_| warp::reject::not_found())?;
                     render_form_error(skus, sku, values, invalid_input(e))
                 }
             };
@@ -135,7 +148,11 @@ fn delete_sku_form(
                 }
                 Err(StoreError::NotFound) => Err(warp::reject::not_found()),
                 Err(e) => {
-                    templates::render_index_html(store.list(), Some(format!("Delete failed: {e}")))
+                    let skus = store
+                        .list()
+                        .await
+                        .map_err(|_| warp::reject::not_found())?;
+                    templates::render_index_html(skus, Some(format!("Delete failed: {e}")))
                         .map(|html| warp::reply::html(html).into_response())
                         .map_err(|_| warp::reject::not_found())
                 }

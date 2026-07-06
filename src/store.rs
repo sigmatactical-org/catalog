@@ -1,11 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use sqlx::PgPool;
+use chrono::{DateTime, Utc};
+use sqlx::{PgPool, Row};
 use thiserror::Error;
 
 use crate::model::{CreateSku, Sku, SkuComponent, SkuKind, UpdateSku};
-
-const SCHEMA: &str = "catalog";
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -37,114 +36,168 @@ pub enum StoreError {
     InvalidInput(String),
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-struct Database {
-    skus: Vec<Sku>,
+impl From<sqlx::Error> for StoreError {
+    fn from(err: sqlx::Error) -> Self {
+        Self::Database(err.into())
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct CatalogStore {
     pool: PgPool,
-    db: Database,
 }
 
 impl CatalogStore {
-    /// Connect to PostgreSQL and load the catalog snapshot.
     pub async fn connect() -> Result<Self, StoreError> {
         let pool = sigma_pg::connect().await?;
-        let db: Database = sigma_pg::load_document(&pool, SCHEMA).await?;
-        Ok(Self { pool, db })
+        Ok(Self { pool })
     }
 
-    /// Reset the catalog snapshot (tests only).
     #[cfg(test)]
     pub async fn connect_empty() -> Result<Self, StoreError> {
-        let pool = sigma_pg::connect().await?;
-        let db = Database::default();
-        sigma_pg::save_document(&pool, SCHEMA, &db).await?;
-        Ok(Self { pool, db })
+        let store = Self::connect().await?;
+        sqlx::query("TRUNCATE catalog.sku_components, catalog.skus")
+            .execute(&store.pool)
+            .await?;
+        Ok(store)
     }
 
-    async fn persist(&self) -> Result<(), StoreError> {
-        sigma_pg::save_document(&self.pool, SCHEMA, &self.db).await?;
-        Ok(())
+    pub async fn list(&self) -> Result<Vec<Sku>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, sku_code, name, description, category, kind, active, updated_at \
+             FROM catalog.skus ORDER BY lower(sku_code)",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        self.rows_to_skus(rows).await
     }
 
-    #[must_use]
-    pub fn list(&self) -> Vec<Sku> {
-        let mut skus = self.db.skus.clone();
-        skus.sort_by(|a, b| a.sku_code.to_lowercase().cmp(&b.sku_code.to_lowercase()));
-        skus
-    }
-
-    #[must_use]
-    pub fn get(&self, id: &str) -> Option<Sku> {
-        self.db.skus.iter().find(|s| s.id == id).cloned()
+    pub async fn get(&self, id: &str) -> Result<Option<Sku>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, sku_code, name, description, category, kind, active, updated_at \
+             FROM catalog.skus WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            Some(row) => {
+                let skus = self.rows_to_skus(vec![row]).await?;
+                Ok(skus.into_iter().next())
+            }
+            None => Ok(None),
+        }
     }
 
     pub async fn create(&mut self, input: CreateSku) -> Result<Sku, StoreError> {
-        self.validate_create(&input)?;
+        self.validate_create(&input).await?;
         let sku = Sku::new(input);
-        self.db.skus.push(sku.clone());
-        self.persist().await?;
+        let mut tx = self.pool.begin().await?;
+        insert_sku(&mut tx, &sku).await?;
+        replace_components(&mut tx, &sku.id, &sku.components).await?;
+        tx.commit().await?;
         Ok(sku)
     }
 
     pub async fn update(&mut self, id: &str, input: UpdateSku) -> Result<Sku, StoreError> {
-        self.validate_update(id, &input)?;
-        let sku = self
-            .db
-            .skus
-            .iter_mut()
-            .find(|s| s.id == id)
+        self.validate_update(id, &input).await?;
+        let mut sku = self
+            .get(id)
+            .await?
             .ok_or(StoreError::NotFound)?;
         sku.apply_update(input);
-        let updated = sku.clone();
-        self.persist().await?;
-        Ok(updated)
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE catalog.skus SET sku_code = $2, name = $3, description = $4, category = $5, \
+             kind = $6, active = $7, updated_at = $8 WHERE id = $1",
+        )
+        .bind(&sku.id)
+        .bind(&sku.sku_code)
+        .bind(&sku.name)
+        .bind(&sku.description)
+        .bind(&sku.category)
+        .bind(kind_str(sku.kind))
+        .bind(sku.active)
+        .bind(parse_ts(&sku.updated_at)?)
+        .execute(&mut *tx)
+        .await?;
+        replace_components(&mut tx, &sku.id, &sku.components).await?;
+        tx.commit().await?;
+        Ok(sku)
     }
 
     pub async fn delete(&mut self, id: &str) -> Result<(), StoreError> {
-        let index = self
-            .db
-            .skus
-            .iter()
-            .position(|s| s.id == id)
-            .ok_or(StoreError::NotFound)?;
-
-        let referencers: Vec<String> = self
-            .db
-            .skus
-            .iter()
-            .filter(|s| s.kind == SkuKind::Composite)
-            .filter(|s| s.components.iter().any(|c| c.sku_id == id))
-            .map(|s| s.sku_code.clone())
-            .collect();
+        if self.get(id).await?.is_none() {
+            return Err(StoreError::NotFound);
+        }
+        let referencers: Vec<String> = sqlx::query_scalar(
+            "SELECT s.sku_code FROM catalog.sku_components c \
+             JOIN catalog.skus s ON s.id = c.parent_sku_id \
+             WHERE c.component_sku_id = $1",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
         if !referencers.is_empty() {
             return Err(StoreError::ReferencedByComposite(referencers.join(", ")));
         }
-
-        self.db.skus.remove(index);
-        self.persist().await
+        sqlx::query("DELETE FROM catalog.skus WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
-    fn validate_create(&self, input: &CreateSku) -> Result<(), StoreError> {
+    async fn rows_to_skus(&self, rows: Vec<sqlx::postgres::PgRow>) -> Result<Vec<Sku>, StoreError> {
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<String> = rows.iter().map(|r| r.get("id")).collect();
+        let comp_rows = sqlx::query(
+            "SELECT parent_sku_id, component_sku_id, quantity FROM catalog.sku_components \
+             WHERE parent_sku_id = ANY($1)",
+        )
+        .bind(&ids)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut components: HashMap<String, Vec<SkuComponent>> = HashMap::new();
+        for row in comp_rows {
+            let parent: String = row.get("parent_sku_id");
+            components
+                .entry(parent)
+                .or_default()
+                .push(SkuComponent {
+                    sku_id: row.get("component_sku_id"),
+                    quantity: row.get::<i32, _>("quantity") as u32,
+                });
+        }
+        rows.into_iter()
+            .map(|row| {
+                let id: String = row.get("id");
+                row_to_sku(row, components.remove(&id).unwrap_or_default())
+            })
+            .collect()
+    }
+
+    async fn validate_create(&self, input: &CreateSku) -> Result<(), StoreError> {
         self.validate_fields(&input.sku_code, &input.name, input.kind, &input.components)?;
-        if self.sku_code_exists(&input.sku_code, None) {
+        if self.sku_code_exists(&input.sku_code, None).await? {
             return Err(StoreError::DuplicateSkuCode);
         }
         self.validate_components(None, input.kind, &input.components)
+            .await
     }
 
-    fn validate_update(&self, id: &str, input: &UpdateSku) -> Result<(), StoreError> {
-        if self.get(id).is_none() {
+    async fn validate_update(&self, id: &str, input: &UpdateSku) -> Result<(), StoreError> {
+        if self.get(id).await?.is_none() {
             return Err(StoreError::NotFound);
         }
         self.validate_fields(&input.sku_code, &input.name, input.kind, &input.components)?;
-        if self.sku_code_exists(&input.sku_code, Some(id)) {
+        if self.sku_code_exists(&input.sku_code, Some(id)).await? {
             return Err(StoreError::DuplicateSkuCode);
         }
         self.validate_components(Some(id), input.kind, &input.components)
+            .await
     }
 
     fn validate_fields(
@@ -162,22 +215,27 @@ impl CatalogStore {
         }
         match kind {
             SkuKind::Simple if !components.is_empty() => Err(StoreError::SimpleHasComponents),
-            SkuKind::Composite if components.is_empty() => {
-                Err(StoreError::CompositeNeedsComponents)
-            }
+            SkuKind::Composite if components.is_empty() => Err(StoreError::CompositeNeedsComponents),
             _ => Ok(()),
         }
     }
 
-    fn sku_code_exists(&self, sku_code: &str, except_id: Option<&str>) -> bool {
-        let normalized = sku_code.trim().to_lowercase();
-        self.db
-            .skus
-            .iter()
-            .any(|s| except_id != Some(s.id.as_str()) && s.sku_code.to_lowercase() == normalized)
+    async fn sku_code_exists(&self, sku_code: &str, except_id: Option<&str>) -> Result<bool, StoreError> {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM catalog.skus
+                WHERE lower(sku_code) = lower($1)
+                  AND ($2::text IS NULL OR id <> $2)
+             )",
+        )
+        .bind(sku_code.trim())
+        .bind(except_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(exists)
     }
 
-    fn validate_components(
+    async fn validate_components(
         &self,
         self_id: Option<&str>,
         kind: SkuKind,
@@ -186,7 +244,6 @@ impl CatalogStore {
         if kind != SkuKind::Composite {
             return Ok(());
         }
-
         for component in components {
             if component.quantity == 0 {
                 return Err(StoreError::InvalidQuantity);
@@ -194,22 +251,26 @@ impl CatalogStore {
             if self_id == Some(component.sku_id.as_str()) {
                 return Err(StoreError::SelfReference);
             }
-            if self.get(&component.sku_id).is_none() {
+            let found: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM catalog.skus WHERE id = $1)",
+            )
+            .bind(&component.sku_id)
+            .fetch_one(&self.pool)
+            .await?;
+            if !found {
                 return Err(StoreError::ComponentNotFound(component.sku_id.clone()));
             }
         }
-
         if let Some(id) = self_id
-            && self.would_cycle(id, components)?
+            && self.would_cycle(id, components).await?
         {
             return Err(StoreError::CycleDetected);
         }
-
         Ok(())
     }
 
-    fn would_cycle(&self, root_id: &str, components: &[SkuComponent]) -> Result<bool, StoreError> {
-        let graph = self.component_graph();
+    async fn would_cycle(&self, root_id: &str, components: &[SkuComponent]) -> Result<bool, StoreError> {
+        let graph = self.component_graph().await?;
         let mut visited = HashSet::new();
         for component in components {
             if dfs_contains(&graph, &component.sku_id, root_id, &mut visited) {
@@ -219,19 +280,100 @@ impl CatalogStore {
         Ok(false)
     }
 
-    fn component_graph(&self) -> HashMap<String, Vec<String>> {
-        self.db
-            .skus
-            .iter()
-            .filter(|s| s.kind == SkuKind::Composite)
-            .map(|s| {
-                (
-                    s.id.clone(),
-                    s.components.iter().map(|c| c.sku_id.clone()).collect(),
-                )
-            })
-            .collect()
+    async fn component_graph(&self) -> Result<HashMap<String, Vec<String>>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT parent_sku_id, component_sku_id FROM catalog.sku_components",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut graph: HashMap<String, Vec<String>> = HashMap::new();
+        for row in rows {
+            graph
+                .entry(row.get("parent_sku_id"))
+                .or_default()
+                .push(row.get("component_sku_id"));
+        }
+        Ok(graph)
     }
+}
+
+async fn insert_sku(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    sku: &Sku,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "INSERT INTO catalog.skus (id, sku_code, name, description, category, kind, active, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    )
+    .bind(&sku.id)
+    .bind(&sku.sku_code)
+    .bind(&sku.name)
+    .bind(&sku.description)
+    .bind(&sku.category)
+    .bind(kind_str(sku.kind))
+    .bind(sku.active)
+    .bind(parse_ts(&sku.updated_at)?)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn replace_components(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    sku_id: &str,
+    components: &[SkuComponent],
+) -> Result<(), StoreError> {
+    sqlx::query("DELETE FROM catalog.sku_components WHERE parent_sku_id = $1")
+        .bind(sku_id)
+        .execute(&mut **tx)
+        .await?;
+    for component in components {
+        sqlx::query(
+            "INSERT INTO catalog.sku_components (parent_sku_id, component_sku_id, quantity) \
+             VALUES ($1, $2, $3)",
+        )
+        .bind(sku_id)
+        .bind(&component.sku_id)
+        .bind(component.quantity as i32)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+fn row_to_sku(row: sqlx::postgres::PgRow, components: Vec<SkuComponent>) -> Result<Sku, StoreError> {
+    let kind_str: String = row.get("kind");
+    Ok(Sku {
+        id: row.get("id"),
+        sku_code: row.get("sku_code"),
+        name: row.get("name"),
+        description: row.get("description"),
+        category: row.get("category"),
+        kind: parse_kind(&kind_str),
+        active: row.get("active"),
+        components,
+        updated_at: row.get::<DateTime<Utc>, _>("updated_at").to_rfc3339(),
+    })
+}
+
+fn kind_str(kind: SkuKind) -> &'static str {
+    match kind {
+        SkuKind::Simple => "simple",
+        SkuKind::Composite => "composite",
+    }
+}
+
+fn parse_kind(value: &str) -> SkuKind {
+    match value {
+        "composite" => SkuKind::Composite,
+        _ => SkuKind::Simple,
+    }
+}
+
+fn parse_ts(value: &str) -> Result<DateTime<Utc>, StoreError> {
+    value
+        .parse::<DateTime<Utc>>()
+        .map_err(|e| StoreError::InvalidInput(format!("invalid timestamp: {e}")))
 }
 
 fn dfs_contains(

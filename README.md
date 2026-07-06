@@ -93,9 +93,9 @@ cargo run -p sigma-catalog
 From the sigma workspace:
 
 ```bash
-cd sigma/it/commerce/catalog && ./scripts/prepare-local.sh && cargo run -p sigma-catalog
+cd sigma/it/catalog && ./scripts/prepare-local.sh && cargo run -p sigma-catalog
 # or prepare all commerce services:
-(cd sigma/it/commerce && ./scripts/prepare-local.sh)
+(cd sigma/it && ./scripts/prepare-commerce-local.sh)
 ```
 
 Open http://localhost:8080
@@ -109,7 +109,7 @@ Release is in **`.github/workflows/release.yml`** when configured. Locally:
 docker build -f Dockerfile build/image
 ```
 
-Data is stored in the shared PostgreSQL `catalog` schema (`catalog.document` JSONB table). Postgres runs in the [platform](https://github.com/sigmatactical-org/platform) kind stack — port-forward for local `cargo run`:
+Data is stored in the shared PostgreSQL `catalog` schema (`catalog.skus` JSONB table). Postgres runs in the [platform](https://github.com/sigmatactical-org/platform) kind stack — port-forward for local `cargo run`:
 
 ```bash
 cd platform && ./scripts/postgres-dev.sh port-forward-bg && ./scripts/postgres-dev.sh migrate
