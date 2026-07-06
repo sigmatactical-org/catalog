@@ -52,7 +52,7 @@ impl CatalogStore {
     /// Connect to PostgreSQL and load the catalog snapshot.
     pub async fn connect() -> Result<Self, StoreError> {
         let pool = sigma_pg::connect().await?;
-        let db: Database = sigma_pg::load_snapshot(&pool, SCHEMA).await?;
+        let db: Database = sigma_pg::load_document(&pool, SCHEMA).await?;
         Ok(Self { pool, db })
     }
 
@@ -61,12 +61,12 @@ impl CatalogStore {
     pub async fn connect_empty() -> Result<Self, StoreError> {
         let pool = sigma_pg::connect().await?;
         let db = Database::default();
-        sigma_pg::save_snapshot(&pool, SCHEMA, &db).await?;
+        sigma_pg::save_document(&pool, SCHEMA, &db).await?;
         Ok(Self { pool, db })
     }
 
     async fn persist(&self) -> Result<(), StoreError> {
-        sigma_pg::save_snapshot(&self.pool, SCHEMA, &self.db).await?;
+        sigma_pg::save_document(&self.pool, SCHEMA, &self.db).await?;
         Ok(())
     }
 

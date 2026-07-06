@@ -109,7 +109,7 @@ Release is in **`.github/workflows/release.yml`** when configured. Locally:
 docker build -f Dockerfile build/image
 ```
 
-Data is stored in the shared PostgreSQL `catalog` schema (`catalog.snapshot` JSONB table). Start Postgres from [sigma-pg](https://github.com/sigmatactical-org/sigma-pg):
+Data is stored in the shared PostgreSQL `catalog` schema (`catalog.document` JSONB table). Start Postgres from [sigma-pg](https://github.com/sigmatactical-org/sigma-pg):
 
 ```bash
 git clone https://github.com/sigmatactical-org/sigma-pg
