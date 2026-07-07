@@ -35,6 +35,15 @@ fn with_store(
     warp::any().map(move || store.clone())
 }
 
+fn content_security_policy() -> String {
+    let identity_origin = config::identity_public_origin();
+    format!(
+        "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; \
+         img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; \
+         font-src 'self'; connect-src 'self' {identity_origin}; form-action 'self'"
+    )
+}
+
 /// Site routes: web UI, JSON API, `/up`, theme static assets, error recovery.
 pub fn routes(
     store: store::CatalogStore,
@@ -56,12 +65,7 @@ pub fn routes(
         .or(sigma_theme::warp::static_files())
         .or(sigma_theme::warp::favicon())
         .recover(sigma_theme::warp::handle_rejection)
-        .with(header(
-            "content-security-policy",
-            "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; \
-             img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; \
-             font-src 'self'; connect-src 'self'; form-action 'self'",
-        ))
+        .with(header("content-security-policy", content_security_policy()))
         .with(header("x-content-type-options", "nosniff"))
         .with(header("x-frame-options", "DENY"))
         .with(header("referrer-policy", "strict-origin-when-cross-origin"))
@@ -98,6 +102,7 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         let body = std::str::from_utf8(res.body()).unwrap();
         assert!(body.contains("Catalog"));
+        assert!(body.contains("id=\"store-nav-auth\""));
     }
 
     #[tokio::test]
