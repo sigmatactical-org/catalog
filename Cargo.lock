@@ -1597,6 +1597,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 [[package]]
 name = "sigma-cart-nav"
 version = "0.1.0"
+source = "git+https://github.com/sigmatactical-org/cart.git#e33c679138d42a09f6a8780979a8a9079769aea6"
 dependencies = [
  "askama",
 ]
@@ -1623,6 +1624,7 @@ dependencies = [
 [[package]]
 name = "sigma-contact-nav"
 version = "0.1.0"
+source = "git+https://github.com/sigmatactical-org/contact.git#301970df0c5e08dd572245b9242e8d14ed536cbe"
 dependencies = [
  "askama",
 ]
@@ -1630,6 +1632,7 @@ dependencies = [
 [[package]]
 name = "sigma-identity-nav"
 version = "0.1.0"
+source = "git+https://github.com/sigmatactical-org/identity.git#99691ea4670f96794a08a7440f9e2722bef66a53"
 dependencies = [
  "askama",
  "sigma-cart-nav",

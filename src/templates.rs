@@ -3,6 +3,11 @@ use askama::Template;
 use crate::model::{Sku, SkuKind, format_components_text};
 use sigma_identity_nav::{AppSiteNav, render_app_site_nav};
 use sigma_theme::copyright_years;
+use sigma_theme::nav::{Breadcrumb, SiteHeader};
+
+fn page_header(brand: &str) -> SiteHeader {
+    SiteHeader::new(brand)
+}
 
 fn site_nav(return_path: &str) -> Result<String, askama::Error> {
     render_app_site_nav(&AppSiteNav {
@@ -22,6 +27,7 @@ fn site_nav(return_path: &str) -> Result<String, askama::Error> {
 struct IndexTemplate {
     skus: Vec<SkuRow>,
     message: Option<String>,
+    site_header: SiteHeader,
     site_nav: String,
     copyright_years: String,
 }
@@ -40,6 +46,7 @@ struct FormTemplate {
     components: String,
     available_skus: Vec<SkuRef>,
     error: Option<String>,
+    site_header: SiteHeader,
     site_nav: String,
     copyright_years: String,
 }
@@ -152,6 +159,11 @@ fn render_form(
         .as_ref()
         .map(|entry| format!("/skus/{}/edit", entry.id))
         .unwrap_or_else(|| "/skus/new".to_string());
+    let form_crumb = if sku.is_some() {
+        "Edit SKU"
+    } else {
+        "New SKU"
+    };
     FormTemplate {
         sku,
         sku_code: values.sku_code,
@@ -164,6 +176,9 @@ fn render_form(
         components: values.components,
         available_skus: sku_refs(&all_skus, exclude_id.as_deref()),
         error,
+        site_header: page_header("Sigma Catalog")
+            .with_breadcrumb(Breadcrumb::link("/", "Catalog"))
+            .with_breadcrumb(Breadcrumb::current(form_crumb)),
         site_nav: site_nav(&return_path)?,
         copyright_years: copyright_years(),
     }
@@ -177,6 +192,7 @@ pub fn render_index_html(skus: Vec<Sku>, message: Option<String>) -> Result<Stri
     IndexTemplate {
         skus: sku_rows(skus),
         message,
+        site_header: page_header("Sigma Catalog"),
         site_nav: site_nav("/")?,
         copyright_years: copyright_years(),
     }
