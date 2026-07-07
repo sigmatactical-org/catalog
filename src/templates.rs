@@ -159,11 +159,7 @@ fn render_form(
         .as_ref()
         .map(|entry| format!("/skus/{}/edit", entry.id))
         .unwrap_or_else(|| "/skus/new".to_string());
-    let form_crumb = if sku.is_some() {
-        "Edit SKU"
-    } else {
-        "New SKU"
-    };
+    let form_crumb = if sku.is_some() { "Edit SKU" } else { "New SKU" };
     FormTemplate {
         sku,
         sku_code: values.sku_code,
