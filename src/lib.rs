@@ -77,6 +77,7 @@ mod tests {
     use warp::http::StatusCode;
 
     async fn test_store() -> store::CatalogStore {
+        sigma_pg::clients::internal::ensure_test_internal_token();
         store::CatalogStore::connect_empty()
             .await
             .expect("PostgreSQL required for tests")
@@ -111,6 +112,10 @@ mod tests {
             .method("GET")
             .path("/skus")
             .header("accept", "application/json")
+            .header(
+                "x-sigma-internal-token",
+                sigma_pg::clients::internal::TEST_INTERNAL_TOKEN,
+            )
             .reply(&routes(test_store().await))
             .await;
         assert_eq!(res.status(), StatusCode::OK);
@@ -124,6 +129,7 @@ mod tests {
             .method("POST")
             .path("/skus")
             .header("content-type", "application/json")
+            .header("x-sigma-internal-token", sigma_pg::clients::internal::TEST_INTERNAL_TOKEN)
             .body(
                 r#"{"sku_code":"WIDGET-01","name":"Widget","description":null,"category":"parts","kind":"simple","active":true,"components":[]}"#,
             )
@@ -144,6 +150,7 @@ mod tests {
             .method("POST")
             .path("/skus")
             .header("content-type", "application/json")
+            .header("x-sigma-internal-token", sigma_pg::clients::internal::TEST_INTERNAL_TOKEN)
             .body(
                 r#"{"sku_code":"PART-A","name":"Part A","description":null,"category":null,"kind":"simple","active":true,"components":[]}"#,
             )
@@ -155,6 +162,7 @@ mod tests {
             .method("POST")
             .path("/skus")
             .header("content-type", "application/json")
+            .header("x-sigma-internal-token", sigma_pg::clients::internal::TEST_INTERNAL_TOKEN)
             .body(format!(
                 r#"{{"sku_code":"KIT-01","name":"Starter kit","description":null,"category":null,"kind":"composite","active":true,"components":[{{"sku_id":"{}","quantity":2}}]}}"#,
                 part.id
