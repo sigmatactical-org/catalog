@@ -1,10 +1,13 @@
 [package]
+
+
 name = "sigma-catalog"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.90.0"
 license = "MIT OR Apache-2.0"
 authors = ["Sigma Tactical Group contributors <https://github.com/sigmatactical-org>"]
+homepage = "https://catalog.sigma-tactical.com"
 description = "Product catalog for Sigma Tactical Group — SKUs and composite items"
 publish = false
 
