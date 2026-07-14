@@ -1,5 +1,7 @@
 //! Sigma Catalog: SKU directory with simple and composite items.
 
+#![forbid(unsafe_code)]
+
 mod api;
 pub mod config;
 mod model;
