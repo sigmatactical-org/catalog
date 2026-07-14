@@ -1,5 +1,8 @@
 # sigma-catalog
 
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![MSRV](https://img.shields.io/badge/MSRV-1.97.0-blue.svg)](https://www.rust-lang.org)
+
 Product catalog for Sigma Tactical Group. Stores simple SKUs and composite items (kits/bundles), with a server-rendered web UI and JSON API.
 
 Repository: https://github.com/sigmatactical-org/catalog

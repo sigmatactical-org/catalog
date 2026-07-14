@@ -4,7 +4,7 @@
 name = "sigma-catalog"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.90.0"
+rust-version = "1.97.0"
 license = "MIT OR Apache-2.0"
 authors = ["Sigma Tactical Group contributors <https://github.com/sigmatactical-org>"]
 homepage = "https://catalog.sigma-tactical.com"
@@ -13,16 +13,16 @@ publish = false
 
 [dependencies]
 askama = "0.16.0"
-chrono = { version = "0.4.42", default-features = false, features = ["clock", "serde"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
+serde_json = "1.0.150"
 sigma-theme = { git = "https://github.com/sigmatactical-org/sigma-theme.git", default-features = false, features = ["askama", "warp"] }
-anyhow = "1.0.70"
+anyhow = "1.0.103"
 sigma-pg = { git = "https://github.com/sigmatactical-org/sigma-pg.git" }
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono"] }
-thiserror = "2.0.17"
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono"] }
+thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "net", "signal", "fs", "sync"] }
-uuid = { version = "1.18.1", features = ["v4", "serde"] }
+uuid = { version = "1.23.5", features = ["v4", "serde"] }
 warp = { version = "0.4.3", features = ["server", "test"] }
 
 [profile.release]
