@@ -8,6 +8,7 @@ use crate::model::SkuForm;
 use crate::store::StoreError;
 use crate::templates::{self, FormValues};
 
+/// Build this module's routes.
 pub fn routes(
     store: impl Filter<Extract = (SharedStore,), Error = Infallible> + Clone + Send + 'static,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone + Send + 'static {

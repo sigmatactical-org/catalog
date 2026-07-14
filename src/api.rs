@@ -61,6 +61,7 @@ fn ensure_internal(
     }
 }
 
+/// Build this module's routes.
 pub fn routes(
     store: impl Filter<Extract = (SharedStore,), Error = Infallible> + Clone + Send + 'static,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone + Send + 'static {

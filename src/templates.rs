@@ -1,3 +1,14 @@
+mod form_template;
+mod form_values;
+mod index_template;
+mod sku_ref;
+mod sku_row;
+pub(crate) use form_template::FormTemplate;
+pub use form_values::FormValues;
+pub(crate) use index_template::IndexTemplate;
+pub use sku_ref::SkuRef;
+pub use sku_row::SkuRow;
+
 use askama::Template;
 
 use crate::model::{Sku, SkuKind, format_components_text};
@@ -21,57 +32,6 @@ fn site_nav(return_path: &str) -> Result<String, askama::Error> {
         show_contact_us: false,
         leading_html: "",
     })
-}
-
-#[derive(Template)]
-#[template(path = "index.html")]
-struct IndexTemplate {
-    skus: Vec<SkuRow>,
-    message: Option<String>,
-    site_header: SiteHeader,
-    site_nav: String,
-    copyright_years: String,
-}
-
-#[derive(Template)]
-#[template(path = "form.html")]
-struct FormTemplate {
-    sku: Option<Sku>,
-    sku_code: String,
-    name: String,
-    description: String,
-    category: String,
-    kind_simple: bool,
-    kind_composite: bool,
-    active: bool,
-    components: String,
-    available_skus: Vec<SkuRef>,
-    error: Option<String>,
-    site_header: SiteHeader,
-    site_nav: String,
-    copyright_years: String,
-}
-
-pub struct SkuRow {
-    pub sku: Sku,
-    pub kind_label: String,
-    pub components_summary: String,
-}
-
-pub struct SkuRef {
-    pub id: String,
-    pub sku_code: String,
-    pub name: String,
-}
-
-pub struct FormValues {
-    pub sku_code: String,
-    pub name: String,
-    pub description: String,
-    pub category: String,
-    pub kind: String,
-    pub active: bool,
-    pub components: String,
 }
 
 fn sku_rows(skus: Vec<Sku>) -> Vec<SkuRow> {
