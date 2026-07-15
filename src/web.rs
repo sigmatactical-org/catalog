@@ -58,7 +58,8 @@ fn create_sku_form(
         .and(warp::post())
         .and(warp::body::form())
         .and(store)
-        .and_then(|form: SkuForm, store: SharedStore| async move {
+        .and_then(|pairs: Vec<(String, String)>, store: SharedStore| async move {
+            let form = SkuForm::from_pairs(&pairs);
             let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
             let values = form_to_values(&form);
             let response = match form.into_create() {
@@ -102,7 +103,8 @@ fn update_sku_form(
         .and(warp::post())
         .and(warp::body::form())
         .and(store)
-        .and_then(|id: String, form: SkuForm, store: SharedStore| async move {
+        .and_then(|id: String, pairs: Vec<(String, String)>, store: SharedStore| async move {
+            let form = SkuForm::from_pairs(&pairs);
             let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
             let values = form_to_values(&form);
             let response = match form.into_update() {
@@ -159,8 +161,8 @@ fn form_to_values(form: &SkuForm) -> FormValues {
         description: form.description.clone(),
         category: form.category.clone(),
         kind: form.kind.clone(),
-        active: form.active.is_some(),
-        components: form.components.clone(),
+        active: form.active,
+        components: form.components_lenient(),
     }
 }
 

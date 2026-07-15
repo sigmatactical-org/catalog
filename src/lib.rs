@@ -176,4 +176,78 @@ mod tests {
         assert_eq!(kit.kind, SkuKind::Composite);
         assert_eq!(kit.components.len(), 1);
     }
+
+    #[tokio::test]
+    async fn web_form_creates_composite_and_index_lists_components() {
+        let store = test_store().await;
+        let app = routes(store);
+
+        let part_res = warp::test::request()
+            .method("POST")
+            .path("/skus")
+            .header("content-type", "application/json")
+            .header("x-sigma-internal-token", sigma_pg::clients::internal::TEST_INTERNAL_TOKEN)
+            .body(
+                r#"{"sku_code":"PART-B","name":"Part B","description":null,"category":null,"kind":"simple","active":true,"components":[]}"#,
+            )
+            .reply(&app)
+            .await;
+        let part: Sku = serde_json::from_slice(part_res.body()).unwrap();
+
+        let res = warp::test::request()
+            .method("POST")
+            .path("/skus")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(format!(
+                "sku_code=KIT-02&name=Form+kit&description=&category=&kind=composite&active=on&component={id}&qty_{id}=3",
+                id = part.id
+            ))
+            .reply(&app)
+            .await;
+        assert!(
+            res.status().is_redirection(),
+            "expected redirect, got {} — {}",
+            res.status(),
+            std::str::from_utf8(res.body()).unwrap_or("")
+        );
+
+        let index = warp::test::request()
+            .method("GET")
+            .path("/")
+            .reply(&app)
+            .await;
+        let body = std::str::from_utf8(index.body()).unwrap();
+        assert!(body.contains("KIT-02"));
+        assert!(body.contains("PART-B"));
+        assert!(body.contains("Part B"));
+        assert!(body.contains("× 3"));
+    }
+
+    #[tokio::test]
+    async fn form_page_offers_component_checkboxes() {
+        let store = test_store().await;
+        let app = routes(store);
+
+        warp::test::request()
+            .method("POST")
+            .path("/skus")
+            .header("content-type", "application/json")
+            .header("x-sigma-internal-token", sigma_pg::clients::internal::TEST_INTERNAL_TOKEN)
+            .body(
+                r#"{"sku_code":"PART-C","name":"Part C","description":null,"category":null,"kind":"simple","active":true,"components":[]}"#,
+            )
+            .reply(&app)
+            .await;
+
+        let res = warp::test::request()
+            .method("GET")
+            .path("/skus/new")
+            .reply(&app)
+            .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = std::str::from_utf8(res.body()).unwrap();
+        assert!(body.contains(r#"name="component""#));
+        assert!(body.contains("PART-C"));
+        assert!(body.contains("Part C"));
+    }
 }

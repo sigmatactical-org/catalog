@@ -47,22 +47,26 @@
       <label class="form-check-label" for="active">Active</label>
     </div>
     <div class="mb-3">
-      <label for="components" class="form-label">Components</label>
-      <textarea class="form-control font-monospace" id="components" name="components" rows="6" placeholder="# One component per line: &lt;sku_id&gt; &lt;quantity&gt;">{{ components }}</textarea>
-      <div class="form-text">
-        Required for composite SKUs. One line per component: SKU id and quantity (space-separated).
-        Lines starting with <code>#</code> are ignored.
+      <span class="form-label d-block">Components</span>
+      {% if component_options.is_empty() %}
+      <p class="text-secondary small mb-1">No other SKUs exist yet. Add simple SKUs first, then build composite items from them.</p>
+      {% else %}
+      <div class="border rounded p-2 overflow-auto" style="max-height: 22rem;">
+        {% for option in component_options %}
+        <div class="d-flex align-items-center gap-2 py-1">
+          <input class="form-check-input flex-shrink-0 mt-0" type="checkbox" name="component" id="component_{{ option.id }}" value="{{ option.id }}" {% if option.selected %}checked{% endif %}>
+          <label class="form-check-label flex-grow-1" for="component_{{ option.id }}">
+            <code>{{ option.sku_code }}</code> — {{ option.name }}
+          </label>
+          <label class="visually-hidden" for="qty_{{ option.id }}">Quantity for {{ option.sku_code }}</label>
+          <input type="number" class="form-control form-control-sm flex-shrink-0" style="width: 5.5rem;" name="qty_{{ option.id }}" id="qty_{{ option.id }}" min="1" value="{{ option.quantity }}">
+        </div>
+        {% endfor %}
       </div>
-      {% if !available_skus.is_empty() %}
-      <details class="mt-2">
-        <summary class="text-secondary small">Available SKUs for reference</summary>
-        <ul class="small text-secondary mb-0 mt-2">
-          {% for available in available_skus %}
-          <li><code>{{ available.id }}</code> — {{ available.sku_code }} ({{ available.name }})</li>
-          {% endfor %}
-        </ul>
-      </details>
       {% endif %}
+      <div class="form-text">
+        Only used for composite SKUs: check each component and set its quantity.
+      </div>
     </div>
     <div class="d-flex gap-2">
       <button type="submit" class="btn btn-primary">Save</button>

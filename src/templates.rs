@@ -1,23 +1,25 @@
+mod component_line;
+mod component_option;
 mod form_template;
 mod form_values;
 mod index_template;
-mod sku_ref;
 mod sku_row;
+pub use component_line::ComponentLine;
+pub use component_option::ComponentOption;
 pub(crate) use form_template::FormTemplate;
 pub use form_values::FormValues;
 pub(crate) use index_template::IndexTemplate;
-pub use sku_ref::SkuRef;
 pub use sku_row::SkuRow;
 
 use askama::Template;
 
-use crate::model::{Sku, SkuKind, format_components_text};
+use crate::model::{Sku, SkuComponent, SkuKind};
 use sigma_theme::copyright_years;
-use sigma_theme::nav::{Breadcrumb, SiteHeader};
+use sigma_theme::nav::{Breadcrumb, SiteHeader, site_menu};
 use sigma_theme::site_nav::{AppSiteNav, render_app_site_nav};
 
-fn page_header(brand: &str) -> SiteHeader {
-    SiteHeader::new(brand)
+fn page_header() -> SiteHeader {
+    SiteHeader::new().with_menu(site_menu(None))
 }
 
 fn site_nav(return_path: &str) -> Result<String, askama::Error> {
@@ -35,9 +37,9 @@ fn site_nav(return_path: &str) -> Result<String, askama::Error> {
 }
 
 fn sku_rows(skus: Vec<Sku>) -> Vec<SkuRow> {
-    let code_by_id: std::collections::HashMap<String, String> = skus
+    let by_id: std::collections::HashMap<String, (String, String)> = skus
         .iter()
-        .map(|s| (s.id.clone(), s.sku_code.clone()))
+        .map(|s| (s.id.clone(), (s.sku_code.clone(), s.name.clone())))
         .collect();
 
     skus.into_iter()
@@ -46,37 +48,47 @@ fn sku_rows(skus: Vec<Sku>) -> Vec<SkuRow> {
                 SkuKind::Simple => "Simple".to_string(),
                 SkuKind::Composite => "Composite".to_string(),
             };
-            let components_summary = if sku.components.is_empty() {
-                String::new()
-            } else {
-                sku.components
-                    .iter()
-                    .map(|c| {
-                        let code = code_by_id
-                            .get(&c.sku_id)
-                            .map(String::as_str)
-                            .unwrap_or(&c.sku_id);
-                        format!("{code} × {qty}", qty = c.quantity)
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
+            let components = sku
+                .components
+                .iter()
+                .map(|c| {
+                    let (sku_code, name) = by_id
+                        .get(&c.sku_id)
+                        .cloned()
+                        .unwrap_or_else(|| (c.sku_id.clone(), String::new()));
+                    ComponentLine {
+                        sku_code,
+                        name,
+                        quantity: c.quantity,
+                    }
+                })
+                .collect();
             SkuRow {
                 sku,
                 kind_label,
-                components_summary,
+                components,
             }
         })
         .collect()
 }
 
-fn sku_refs(skus: &[Sku], exclude_id: Option<&str>) -> Vec<SkuRef> {
+/// Every SKU except the one being edited, marked with the current selection.
+fn component_options(
+    skus: &[Sku],
+    exclude_id: Option<&str>,
+    selected: &[SkuComponent],
+) -> Vec<ComponentOption> {
     skus.iter()
         .filter(|s| exclude_id != Some(s.id.as_str()))
-        .map(|s| SkuRef {
-            id: s.id.clone(),
-            sku_code: s.sku_code.clone(),
-            name: s.name.clone(),
+        .map(|s| {
+            let selection = selected.iter().find(|c| c.sku_id == s.id);
+            ComponentOption {
+                id: s.id.clone(),
+                sku_code: s.sku_code.clone(),
+                name: s.name.clone(),
+                selected: selection.is_some(),
+                quantity: selection.map_or(1, |c| c.quantity),
+            }
         })
         .collect()
 }
@@ -92,7 +104,7 @@ fn values_from_sku(sku: &Sku) -> FormValues {
             SkuKind::Composite => "composite".to_string(),
         },
         active: sku.active,
-        components: format_components_text(&sku.components),
+        components: sku.components.clone(),
     }
 }
 
@@ -104,7 +116,7 @@ fn default_form_values() -> FormValues {
         category: String::new(),
         kind: "simple".to_string(),
         active: true,
-        components: String::new(),
+        components: Vec::new(),
     }
 }
 
@@ -122,6 +134,7 @@ fn render_form(
         .unwrap_or_else(|| "/skus/new".to_string());
     let form_crumb = if sku.is_some() { "Edit SKU" } else { "New SKU" };
     FormTemplate {
+        component_options: component_options(&all_skus, exclude_id.as_deref(), &values.components),
         sku,
         sku_code: values.sku_code,
         name: values.name,
@@ -130,10 +143,8 @@ fn render_form(
         kind_simple: kind == "simple",
         kind_composite: kind == "composite",
         active: values.active,
-        components: values.components,
-        available_skus: sku_refs(&all_skus, exclude_id.as_deref()),
         error,
-        site_header: page_header("Sigma Catalog")
+        site_header: page_header()
             .with_breadcrumb(Breadcrumb::link("/", "Catalog"))
             .with_breadcrumb(Breadcrumb::current(form_crumb)),
         site_nav: site_nav(&return_path)?,
@@ -149,7 +160,7 @@ pub fn render_index_html(skus: Vec<Sku>, message: Option<String>) -> Result<Stri
     IndexTemplate {
         skus: sku_rows(skus),
         message,
-        site_header: page_header("Sigma Catalog"),
+        site_header: page_header(),
         site_nav: site_nav("/")?,
         copyright_years: copyright_years(),
     }

@@ -43,7 +43,17 @@
           <td>{{ row.sku.name }}</td>
           <td>{{ row.kind_label }}</td>
           <td>{% if let Some(category) = row.sku.category.as_ref() %}{{ category }}{% else %}<span class="text-secondary">—</span>{% endif %}</td>
-          <td>{% if row.components_summary.is_empty() %}<span class="text-secondary">—</span>{% else %}{{ row.components_summary }}{% endif %}</td>
+          <td>
+            {% if row.components.is_empty() %}
+            <span class="text-secondary">—</span>
+            {% else %}
+            <ul class="list-unstyled mb-0">
+              {% for line in row.components %}
+              <li><code>{{ line.sku_code }}</code>{% if !line.name.is_empty() %} {{ line.name }}{% endif %} × {{ line.quantity }}</li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+          </td>
           <td>{% if row.sku.active %}<span class="text-success">Yes</span>{% else %}<span class="text-secondary">No</span>{% endif %}</td>
           <td class="text-secondary"><small>{{ row.sku.updated_at }}</small></td>
           <td class="text-nowrap">

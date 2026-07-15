@@ -8,5 +8,5 @@ use crate::model::Sku;
 pub struct SkuRow {
     pub sku: Sku,
     pub kind_label: String,
-    pub components_summary: String,
+    pub components: Vec<ComponentLine>,
 }

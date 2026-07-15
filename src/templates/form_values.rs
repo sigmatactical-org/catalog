@@ -2,6 +2,7 @@
 
 #[allow(unused_imports)]
 use super::*;
+use crate::model::SkuComponent;
 
 /// Prefilled field values for the edit/create form.
 pub struct FormValues {
@@ -11,5 +12,5 @@ pub struct FormValues {
     pub category: String,
     pub kind: String,
     pub active: bool,
-    pub components: String,
+    pub components: Vec<SkuComponent>,
 }
