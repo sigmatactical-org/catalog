@@ -22,6 +22,7 @@ impl CatalogStore {
     #[cfg(test)]
     pub async fn connect_empty() -> Result<Self, StoreError> {
         let store = Self::connect().await?;
+        sigma_pg::assert_disposable_test_db(&store.pool).await;
         sqlx::query("TRUNCATE catalog.sku_components, catalog.skus")
             .execute(&store.pool)
             .await?;
