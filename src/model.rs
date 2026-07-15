@@ -27,4 +27,3 @@ fn parse_kind(value: &str) -> Result<SkuKind, String> {
         other => Err(format!("invalid kind: {other}")),
     }
 }
-
