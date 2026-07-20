@@ -1,10 +1,10 @@
 //! [`FormTemplate`].
 
-#[allow(unused_imports)]
-use super::*;
 use crate::model::Sku;
 use askama::Template;
 use sigma_theme::nav::SiteHeader;
+
+use super::ComponentOption;
 
 #[derive(Template)]
 #[template(path = "form.html")]

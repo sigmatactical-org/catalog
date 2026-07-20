@@ -14,21 +14,24 @@ use std::sync::Arc;
 
 use warp::Filter;
 use warp::Reply;
+use warp::http::header::{HeaderName, HeaderValue};
 
 pub use model::{CreateSku, Sku, SkuComponent, SkuKind, UpdateSku};
 
 /// Shared catalog store handle (`PgPool` is internally concurrent).
 pub type SharedStore = Arc<store::CatalogStore>;
 
-/// Resolve listen address from **`PORT`** (default **8080**).
-#[must_use]
-pub fn listen_socket_addr_from_env() -> std::net::SocketAddr {
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(8080);
-    SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)
+/// Connect to PostgreSQL and serve the site until a shutdown signal arrives.
+///
+/// # Errors
+///
+/// Returns an error when the database connection or binding the listen
+/// address fails.
+pub async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let store = store::CatalogStore::connect().await?;
+    let addr = sigma_theme::warp::listen_addr_from_env();
+    sigma_theme::warp::serve("Sigma Catalog", addr, routes(store)).await?;
+    Ok(())
 }
 
 fn with_store(
@@ -37,6 +40,8 @@ fn with_store(
     warp::any().map(move || store.clone())
 }
 
+/// Local CSP: the shared `sigma_theme::warp::security_headers` helper hard-codes
+/// `style-src 'self'`, and the SKU form relies on inline `style` attributes.
 fn content_security_policy() -> String {
     let identity_origin = config::identity_public_origin();
     format!(
@@ -46,31 +51,35 @@ fn content_security_policy() -> String {
     )
 }
 
+/// Local CSP plus the shared security header set (see
+/// [`sigma_theme::SECURITY_HEADERS`]).
+fn security_header_map() -> warp::http::HeaderMap {
+    let mut map = warp::http::HeaderMap::new();
+    map.insert(
+        warp::http::header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_str(&content_security_policy()).expect("valid CSP header value"),
+    );
+    for (name, value) in sigma_theme::SECURITY_HEADERS {
+        map.insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_static(value),
+        );
+    }
+    map
+}
+
 /// Site routes: web UI, JSON API, `/up`, theme static assets, error recovery.
 pub fn routes(
     store: store::CatalogStore,
 ) -> impl Filter<Extract = (impl Reply,), Error = Infallible> + Clone + Send + 'static {
-    use warp::reply::with::header;
-
     let health_pool = Arc::new(store.pool().clone());
     let store = Arc::new(store);
 
-    warp::path("up")
-        .and(warp::get())
-        .map(|| warp::reply::with_status("up", warp::http::StatusCode::OK))
-        .or(sigma_pg::health::warp::health_routes(
-            "catalog",
-            Some(health_pool),
-        ))
-        .or(web::routes(with_store(store.clone())))
-        .or(api::routes(with_store(store)))
-        .or(sigma_theme::warp::static_files())
-        .or(sigma_theme::warp::favicon())
-        .recover(sigma_theme::warp::handle_rejection)
-        .with(header("content-security-policy", content_security_policy()))
-        .with(header("x-content-type-options", "nosniff"))
-        .with(header("x-frame-options", "DENY"))
-        .with(header("referrer-policy", "strict-origin-when-cross-origin"))
+    sigma_theme::warp::site_routes(
+        web::routes(with_store(store.clone())).or(api::routes(with_store(store))),
+        sigma_pg::health::warp::health_routes("catalog", Some(health_pool)),
+    )
+    .with(warp::reply::with::headers(security_header_map()))
 }
 
 #[cfg(test)]
@@ -93,6 +102,27 @@ mod tests {
             .reply(&routes(test_store().await))
             .await;
         assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn csp_allows_identity_status_fetch() {
+        let csp = content_security_policy();
+        assert!(
+            csp.contains("connect-src 'self' http://127.0.0.1:3000"),
+            "csp should allow identity origin, got: {csp}"
+        );
+    }
+
+    #[tokio::test]
+    async fn responses_carry_shared_security_headers() {
+        let res = warp::test::request()
+            .method("GET")
+            .path("/up")
+            .reply(&routes(test_store().await))
+            .await;
+        for (name, value) in sigma_theme::SECURITY_HEADERS {
+            assert_eq!(res.headers().get(*name).unwrap(), value, "header {name}");
+        }
     }
 
     #[tokio::test]

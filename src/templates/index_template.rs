@@ -1,9 +1,9 @@
 //! [`IndexTemplate`].
 
-#[allow(unused_imports)]
-use super::*;
 use askama::Template;
 use sigma_theme::nav::SiteHeader;
+
+use super::SkuRow;
 
 #[derive(Template)]
 #[template(path = "index.html")]

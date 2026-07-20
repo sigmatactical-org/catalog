@@ -1,8 +1,8 @@
 //! [`CreateSku`].
 
-#[allow(unused_imports)]
-use super::*;
 use serde::Deserialize;
+
+use super::{SkuComponent, SkuKind};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateSku {

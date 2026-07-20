@@ -1,7 +1,6 @@
 //! [`SkuForm`].
 
-#[allow(unused_imports)]
-use super::*;
+use super::{CreateSku, SkuComponent, SkuKind, UpdateSku, empty_to_none};
 
 #[derive(Debug, Clone)]
 pub struct SkuForm {
@@ -44,7 +43,7 @@ impl SkuForm {
 
     /// Validate the form into a create request.
     pub fn into_create(self) -> Result<CreateSku, String> {
-        let kind = parse_kind(&self.kind)?;
+        let kind: SkuKind = self.kind.parse()?;
         let components = if kind == SkuKind::Composite {
             self.parsed_components()?
         } else {
@@ -63,7 +62,7 @@ impl SkuForm {
 
     /// Validate the form into an update request.
     pub fn into_update(self) -> Result<UpdateSku, String> {
-        let kind = parse_kind(&self.kind)?;
+        let kind: SkuKind = self.kind.parse()?;
         let components = if kind == SkuKind::Composite {
             self.parsed_components()?
         } else {

@@ -1,8 +1,9 @@
 //! [`Sku`].
 
-#[allow(unused_imports)]
-use super::*;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+use super::{CreateSku, SkuComponent, SkuKind, UpdateSku};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sku {
@@ -17,12 +18,11 @@ pub struct Sku {
     pub active: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub components: Vec<SkuComponent>,
-    pub updated_at: String,
+    pub updated_at: DateTime<Utc>,
 }
 impl Sku {
     /// New Sku from a create request.
     pub fn new(input: CreateSku) -> Self {
-        let now = chrono::Utc::now().to_rfc3339();
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             sku_code: input.sku_code.trim().to_string(),
@@ -32,7 +32,7 @@ impl Sku {
             kind: input.kind,
             active: input.active.unwrap_or(true),
             components: input.components,
-            updated_at: now,
+            updated_at: Utc::now(),
         }
     }
 
@@ -45,6 +45,6 @@ impl Sku {
         self.kind = input.kind;
         self.active = input.active;
         self.components = input.components;
-        self.updated_at = chrono::Utc::now().to_rfc3339();
+        self.updated_at = Utc::now();
     }
 }

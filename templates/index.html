@@ -55,7 +55,7 @@
             {% endif %}
           </td>
           <td>{% if row.sku.active %}<span class="text-success">Yes</span>{% else %}<span class="text-secondary">No</span>{% endif %}</td>
-          <td class="text-secondary"><small>{{ row.sku.updated_at }}</small></td>
+          <td class="text-secondary"><small>{{ row.updated_at }}</small></td>
           <td class="text-nowrap">
             <a class="btn btn-sm btn-outline-primary" href="/skus/{{ row.sku.id }}/edit">Edit</a>
             <form method="post" action="/skus/{{ row.sku.id }}/delete" class="d-inline" onsubmit="return confirm('Delete this SKU?');">

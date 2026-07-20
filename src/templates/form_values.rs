@@ -1,7 +1,5 @@
 //! [`FormValues`].
 
-#[allow(unused_imports)]
-use super::*;
 use crate::model::SkuComponent;
 
 /// Prefilled field values for the edit/create form.

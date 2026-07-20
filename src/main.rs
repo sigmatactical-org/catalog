@@ -1,49 +1,8 @@
 #![forbid(unsafe_code)]
 
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
-
-fn main() -> Result<(), BoxError> {
-    let addr = sigma_catalog::listen_socket_addr_from_env();
-
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(async move {
-            let store = sigma_catalog::store::CatalogStore::connect().await?;
-            let listener = tokio::net::TcpListener::bind(addr).await?;
-            println!("Sigma Catalog listening on http://{addr}");
-            warp::serve(sigma_catalog::routes(store))
-                .incoming(listener)
-                .graceful(shutdown_signal())
-                .run()
-                .await;
-            Ok::<(), BoxError>(())
-        })
-}
-
-async fn shutdown_signal() {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-        let (mut term, mut int) = match (
-            signal(SignalKind::terminate()),
-            signal(SignalKind::interrupt()),
-        ) {
-            (Ok(term), Ok(int)) => (term, int),
-            _ => {
-                eprintln!("warning: could not install signal handlers; graceful shutdown disabled");
-                std::future::pending::<()>().await;
-                return;
-            }
-        };
-        tokio::select! {
-            _ = term.recv() => {}
-            _ = int.recv() => {}
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
-    }
+        .block_on(sigma_catalog::run())
 }

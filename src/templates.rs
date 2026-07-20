@@ -14,6 +14,11 @@ pub use sku_row::SkuRow;
 use askama::Template;
 
 use crate::model::{Sku, SkuComponent, SkuKind};
+
+/// Timestamp rendering for the SKU table (the model keeps `DateTime<Utc>`).
+fn format_timestamp(timestamp: chrono::DateTime<chrono::Utc>) -> String {
+    timestamp.to_rfc3339()
+}
 use sigma_theme::copyright_years;
 use sigma_theme::nav::{Breadcrumb, SiteHeader, site_menu};
 use sigma_theme::site_nav::{AppSiteNav, render_app_site_nav};
@@ -44,10 +49,8 @@ fn sku_rows(skus: Vec<Sku>) -> Vec<SkuRow> {
 
     skus.into_iter()
         .map(|sku| {
-            let kind_label = match sku.kind {
-                SkuKind::Simple => "Simple".to_string(),
-                SkuKind::Composite => "Composite".to_string(),
-            };
+            let kind_label = sku.kind.label();
+            let updated_at = format_timestamp(sku.updated_at);
             let components = sku
                 .components
                 .iter()
@@ -66,6 +69,7 @@ fn sku_rows(skus: Vec<Sku>) -> Vec<SkuRow> {
             SkuRow {
                 sku,
                 kind_label,
+                updated_at,
                 components,
             }
         })
@@ -99,10 +103,7 @@ fn values_from_sku(sku: &Sku) -> FormValues {
         name: sku.name.clone(),
         description: sku.description.clone().unwrap_or_default(),
         category: sku.category.clone().unwrap_or_default(),
-        kind: match sku.kind {
-            SkuKind::Simple => "simple".to_string(),
-            SkuKind::Composite => "composite".to_string(),
-        },
+        kind: sku.kind.as_str().to_string(),
         active: sku.active,
         components: sku.components.clone(),
     }
@@ -114,7 +115,7 @@ fn default_form_values() -> FormValues {
         name: String::new(),
         description: String::new(),
         category: String::new(),
-        kind: "simple".to_string(),
+        kind: SkuKind::Simple.as_str().to_string(),
         active: true,
         components: Vec::new(),
     }
@@ -126,7 +127,7 @@ fn render_form(
     error: Option<String>,
     values: FormValues,
 ) -> Result<String, askama::Error> {
-    let kind = values.kind.to_lowercase();
+    let kind = values.kind.parse::<SkuKind>().ok();
     let exclude_id = sku.as_ref().map(|s| s.id.clone());
     let return_path = sku
         .as_ref()
@@ -140,8 +141,8 @@ fn render_form(
         name: values.name,
         description: values.description,
         category: values.category,
-        kind_simple: kind == "simple",
-        kind_composite: kind == "composite",
+        kind_simple: kind != Some(SkuKind::Composite),
+        kind_composite: kind == Some(SkuKind::Composite),
         active: values.active,
         error,
         site_header: page_header()

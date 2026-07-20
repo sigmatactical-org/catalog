@@ -1,28 +1,16 @@
 use std::convert::Infallible;
 
+use sigma_pg::api::{internal_auth, json_error};
 use warp::http::StatusCode;
-use warp::reply::Response;
 use warp::{Filter, Rejection, Reply};
 
 use crate::SharedStore;
 use crate::model::{CreateSku, UpdateSku};
 use crate::store::StoreError;
 
-#[derive(serde::Serialize)]
-struct ErrorBody {
-    error: String,
-}
-
-fn json_error(status: StatusCode, message: impl Into<String>) -> Response {
-    warp::reply::with_status(
-        warp::reply::json(&ErrorBody {
-            error: message.into(),
-        }),
-        status,
-    )
-    .into_response()
-}
-
+/// HTTP status for a catalog store error. Local because catalog's error set is
+/// richer than `sigma_pg::api::StoreError` (e.g. `ReferencedByComposite` is a
+/// 409, which the shared three-variant enum cannot express).
 fn store_error_status(err: &StoreError) -> StatusCode {
     match err {
         StoreError::NotFound => StatusCode::NOT_FOUND,
@@ -34,30 +22,10 @@ fn store_error_status(err: &StoreError) -> StatusCode {
         | StoreError::ComponentNotFound(_)
         | StoreError::InvalidQuantity
         | StoreError::SelfReference
-        | StoreError::CycleDetected => StatusCode::BAD_REQUEST,
+        | StoreError::CycleDetected
+        | StoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
         StoreError::ReferencedByComposite(_) => StatusCode::CONFLICT,
-        StoreError::InvalidInput(_) => StatusCode::BAD_REQUEST,
         StoreError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
-    }
-}
-
-fn internal_auth()
--> impl Filter<Extract = (Option<String>, Option<String>), Error = Rejection> + Clone {
-    warp::header::optional::<String>("authorization")
-        .and(warp::header::optional::<String>("x-sigma-internal-token"))
-}
-
-fn ensure_internal(
-    authorization: Option<String>,
-    internal_token: Option<String>,
-) -> Result<(), Rejection> {
-    if sigma_pg::clients::internal::authorize_internal(
-        authorization.as_deref(),
-        internal_token.as_deref(),
-    ) {
-        Ok(())
-    } else {
-        Err(warp::reject::not_found())
     }
 }
 
@@ -80,13 +48,13 @@ fn list_skus(
         .and(warp::get())
         .and(internal_auth())
         .and(store)
-        .and_then(
-            |authorization, internal_token, store: SharedStore| async move {
-                ensure_internal(authorization, internal_token)?;
-                let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
-                Ok::<_, Rejection>(warp::reply::json(&skus))
-            },
-        )
+        .and_then(|store: SharedStore| async move {
+            let response = match store.list().await {
+                Ok(skus) => warp::reply::json(&skus).into_response(),
+                Err(e) => json_error(store_error_status(&e), e.to_string()),
+            };
+            Ok::<_, Rejection>(response)
+        })
 }
 
 fn get_sku(
@@ -97,19 +65,13 @@ fn get_sku(
         .and(warp::get())
         .and(internal_auth())
         .and(store)
-        .and_then(
-            |id: String, authorization, internal_token, store: SharedStore| async move {
-                ensure_internal(authorization, internal_token)?;
-                match store
-                    .get(&id)
-                    .await
-                    .map_err(|_| warp::reject::not_found())?
-                {
-                    Some(sku) => Ok(warp::reply::json(&sku)),
-                    None => Err(warp::reject::not_found()),
-                }
-            },
-        )
+        .and_then(|id: String, store: SharedStore| async move {
+            match store.get(&id).await {
+                Ok(Some(sku)) => Ok(warp::reply::json(&sku).into_response()),
+                Ok(None) => Err(warp::reject::not_found()),
+                Err(e) => Ok(json_error(store_error_status(&e), e.to_string())),
+            }
+        })
 }
 
 fn create_sku(
@@ -121,19 +83,14 @@ fn create_sku(
         .and(warp::body::json())
         .and(internal_auth())
         .and(store)
-        .and_then(
-            |input: CreateSku, authorization, internal_token, store: SharedStore| async move {
-                ensure_internal(authorization, internal_token)?;
-                let response = match store.create(input).await {
-                    Ok(sku) => {
-                        warp::reply::with_status(warp::reply::json(&sku), StatusCode::CREATED)
-                            .into_response()
-                    }
-                    Err(e) => json_error(store_error_status(&e), e.to_string()),
-                };
-                Ok::<_, Rejection>(response)
-            },
-        )
+        .and_then(|input: CreateSku, store: SharedStore| async move {
+            let response = match store.create(input).await {
+                Ok(sku) => warp::reply::with_status(warp::reply::json(&sku), StatusCode::CREATED)
+                    .into_response(),
+                Err(e) => json_error(store_error_status(&e), e.to_string()),
+            };
+            Ok::<_, Rejection>(response)
+        })
 }
 
 fn update_sku(
@@ -146,8 +103,7 @@ fn update_sku(
         .and(internal_auth())
         .and(store)
         .and_then(
-            |id: String, input: UpdateSku, authorization, internal_token, store: SharedStore| async move {
-                ensure_internal(authorization, internal_token)?;
+            |id: String, input: UpdateSku, store: SharedStore| async move {
                 let response = match store.update(&id, input).await {
                     Ok(sku) => warp::reply::json(&sku).into_response(),
                     Err(StoreError::NotFound) => return Err(warp::reject::not_found()),
@@ -166,16 +122,14 @@ fn delete_sku(
         .and(warp::delete())
         .and(internal_auth())
         .and(store)
-        .and_then(
-            |id: String, authorization, internal_token, store: SharedStore| async move {
-                ensure_internal(authorization, internal_token)?;
-                let response = match store.delete(&id).await {
-                    Ok(()) => warp::reply::with_status(warp::reply(), StatusCode::NO_CONTENT)
-                        .into_response(),
-                    Err(StoreError::NotFound) => return Err(warp::reject::not_found()),
-                    Err(e) => json_error(store_error_status(&e), e.to_string()),
-                };
-                Ok(response)
-            },
-        )
+        .and_then(|id: String, store: SharedStore| async move {
+            let response = match store.delete(&id).await {
+                Ok(()) => {
+                    warp::reply::with_status(warp::reply(), StatusCode::NO_CONTENT).into_response()
+                }
+                Err(StoreError::NotFound) => return Err(warp::reject::not_found()),
+                Err(e) => json_error(store_error_status(&e), e.to_string()),
+            };
+            Ok(response)
+        })
 }

@@ -19,11 +19,3 @@ fn empty_to_none(value: String) -> Option<String> {
         Some(trimmed.to_string())
     }
 }
-
-fn parse_kind(value: &str) -> Result<SkuKind, String> {
-    match value.trim().to_lowercase().as_str() {
-        "simple" => Ok(SkuKind::Simple),
-        "composite" => Ok(SkuKind::Composite),
-        other => Err(format!("invalid kind: {other}")),
-    }
-}

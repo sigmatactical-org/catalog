@@ -1,8 +1,5 @@
 //! [`ComponentOption`].
 
-#[allow(unused_imports)]
-use super::*;
-
 /// One selectable component row in the SKU form picker.
 pub struct ComponentOption {
     pub id: String,
