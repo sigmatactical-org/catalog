@@ -19,9 +19,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.103"
+version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "askama"
@@ -1696,6 +1696,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 [[package]]
 name = "sigma-cart-nav"
 version = "0.1.0"
+source = "git+https://github.com/sigmatactical-org/cart.git#ce79be9b0ab1773fcfdb153069c5579f65435e5d"
 dependencies = [
  "askama",
 ]
@@ -1721,6 +1722,7 @@ dependencies = [
 [[package]]
 name = "sigma-contact-nav"
 version = "0.1.0"
+source = "git+https://github.com/sigmatactical-org/contact.git#4815f7e64ebf70006b8d5e7c560f4e743bf96c92"
 dependencies = [
  "askama",
  "urlencoding",
@@ -1729,6 +1731,7 @@ dependencies = [
 [[package]]
 name = "sigma-identity-nav"
 version = "0.1.0"
+source = "git+https://github.com/sigmatactical-org/identity.git#8cba8a657f7593332d39ba11c121e078e4c6b141"
 dependencies = [
  "askama",
  "urlencoding",
@@ -1737,6 +1740,7 @@ dependencies = [
 [[package]]
 name = "sigma-pg"
 version = "0.1.0"
+source = "git+https://github.com/sigmatactical-org/sigma-pg.git#52adb2e9aeae44f95de2d4a39ed765c01e259b98"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1753,6 +1757,7 @@ dependencies = [
 [[package]]
 name = "sigma-theme"
 version = "0.1.0"
+source = "git+https://github.com/sigmatactical-org/sigma-theme.git#61dff94ed08e99bc8e75c1a284ce75d50579faff"
 dependencies = [
  "askama",
  "mime_guess",
