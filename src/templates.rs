@@ -14,14 +14,14 @@ pub use sku_row::SkuRow;
 use askama::Template;
 
 use crate::model::{Sku, SkuComponent, SkuKind};
+use sigma_theme::copyright_years;
+use sigma_theme::nav::{Breadcrumb, SiteHeader, site_menu};
+use sigma_theme::site_nav::{AppSiteNav, render_app_site_nav};
 
 /// Timestamp rendering for the SKU table (the model keeps `DateTime<Utc>`).
 fn format_timestamp(timestamp: chrono::DateTime<chrono::Utc>) -> String {
     timestamp.to_rfc3339()
 }
-use sigma_theme::copyright_years;
-use sigma_theme::nav::{Breadcrumb, SiteHeader, site_menu};
-use sigma_theme::site_nav::{AppSiteNav, render_app_site_nav};
 
 fn page_header() -> SiteHeader {
     SiteHeader::new("Catalog").with_menu(site_menu(None))
