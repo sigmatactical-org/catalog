@@ -28,6 +28,7 @@ pub type SharedStore = Arc<store::CatalogStore>;
 /// Returns an error when the database connection or binding the listen
 /// address fails.
 pub async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    config::validate_with(&[sigma_config::DATABASE_URL_VAR])?;
     let store = store::CatalogStore::connect().await?;
     let addr = sigma_theme::warp::listen_addr_from_env();
     sigma_theme::warp::serve("Sigma Catalog", addr, routes(store)).await?;
@@ -83,10 +84,7 @@ mod tests {
     use warp::http::StatusCode;
 
     async fn test_store() -> store::CatalogStore {
-        sigma_pg::clients::internal::ensure_test_internal_token();
-        store::CatalogStore::connect_empty()
-            .await
-            .expect("PostgreSQL required for tests")
+        sigma_pg::test_helpers::ready_store(store::CatalogStore::connect_empty()).await
     }
 
     #[tokio::test]

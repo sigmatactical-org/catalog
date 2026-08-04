@@ -14,18 +14,21 @@ pub struct CatalogStore {
 
 impl CatalogStore {
     pub async fn connect() -> Result<Self, StoreError> {
-        let pool = sigma_pg::connect_as("catalog").await?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool: sigma_pg::PgStore::connect("catalog").await?.into_inner(),
+        })
     }
 
     #[cfg(test)]
     pub async fn connect_empty() -> Result<Self, StoreError> {
-        let store = Self::connect().await?;
-        sigma_pg::assert_disposable_test_db(&store.pool).await;
-        sqlx::query("TRUNCATE catalog.sku_components, catalog.skus")
-            .execute(&store.pool)
-            .await?;
-        Ok(store)
+        Ok(Self {
+            pool: sigma_pg::PgStore::connect_empty(
+                "catalog",
+                "TRUNCATE catalog.sku_components, catalog.skus",
+            )
+            .await?
+            .into_inner(),
+        })
     }
 
     #[must_use]
