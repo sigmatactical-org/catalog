@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 
+use sigma_theme::warp::internal_rejection;
 use warp::http::StatusCode;
 use warp::{Filter, Rejection, Reply};
 
@@ -27,10 +28,13 @@ fn index_page(
         .and(warp::get())
         .and(store)
         .and_then(|store: SharedStore| async move {
-            let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
+            let skus = store
+                .list()
+                .await
+                .map_err(|e| internal_rejection("list SKUs", e))?;
             templates::render_index_html(skus, None)
                 .map(warp::reply::html)
-                .map_err(|_| warp::reject::not_found())
+                .map_err(|e| internal_rejection("render SKU index", e))
         })
 }
 
@@ -45,10 +49,13 @@ fn new_sku_page(
         .and_then(|store: SharedStore| async move {
             // The form offers every other SKU as a component, so the list is
             // needed even when creating.
-            let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
+            let skus = store
+                .list()
+                .await
+                .map_err(|e| internal_rejection("list SKUs", e))?;
             templates::render_form_html(skus, None, None)
                 .map(warp::reply::html)
-                .map_err(|_| warp::reject::not_found())
+                .map_err(|e| internal_rejection("render SKU form", e))
         })
 }
 
@@ -63,7 +70,10 @@ fn create_sku_form(
         .and_then(
             |pairs: Vec<(String, String)>, store: SharedStore| async move {
                 let form = SkuForm::from_pairs(&pairs);
-                let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
+                let skus = store
+                    .list()
+                    .await
+                    .map_err(|e| internal_rejection("list SKUs", e))?;
                 let values = form_to_values(&form);
                 let response = match form.into_create() {
                     Ok(input) => match store.create(input).await {
@@ -86,13 +96,13 @@ fn edit_sku_page(
         .and(store)
         .and_then(|id: String, store: SharedStore| async move {
             let (sku, skus) = tokio::join!(store.get(&id), store.list());
-            let Ok(Some(sku)) = sku else {
+            let Some(sku) = sku.map_err(|e| internal_rejection("read SKU", e))? else {
                 return Err(warp::reject::not_found());
             };
-            let skus = skus.map_err(|_| warp::reject::not_found())?;
+            let skus = skus.map_err(|e| internal_rejection("list SKUs", e))?;
             templates::render_form_html(skus, Some(sku), None)
                 .map(warp::reply::html)
-                .map_err(|_| warp::reject::not_found())
+                .map_err(|e| internal_rejection("render SKU form", e))
         })
 }
 
@@ -109,7 +119,7 @@ fn update_sku_form(
                 // Every error path re-renders the edit form, which needs both
                 // the SKU list and the SKU itself: fetch them once up front.
                 let (skus, sku) = tokio::join!(store.list(), store.get(&id));
-                let skus = skus.map_err(|_| warp::reject::not_found())?;
+                let skus = skus.map_err(|e| internal_rejection("list SKUs", e))?;
                 let sku = sku.ok().flatten();
                 let values = form_to_values(&form);
                 let response = match form.into_update() {
@@ -138,10 +148,13 @@ fn delete_sku_form(
                 }
                 Err(StoreError::NotFound) => Err(warp::reject::not_found()),
                 Err(e) => {
-                    let skus = store.list().await.map_err(|_| warp::reject::not_found())?;
+                    let skus = store
+                        .list()
+                        .await
+                        .map_err(|e| internal_rejection("list SKUs", e))?;
                     templates::render_index_html(skus, Some(format!("Delete failed: {e}")))
                         .map(|html| warp::reply::html(html).into_response())
-                        .map_err(|_| warp::reject::not_found())
+                        .map_err(|e| internal_rejection("render SKU index", e))
                 }
             }
         })

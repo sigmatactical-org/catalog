@@ -34,12 +34,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-fn with_store(
-    store: SharedStore,
-) -> impl Filter<Extract = (SharedStore,), Error = Infallible> + Clone {
-    warp::any().map(move || store.clone())
-}
-
 /// Local CSP: the shared `sigma_theme::warp::security_headers` helper hard-codes
 /// `style-src 'self'`, and the SKU form relies on inline `style` attributes.
 fn content_security_policy() -> String {
@@ -76,7 +70,8 @@ pub fn routes(
     let store = Arc::new(store);
 
     sigma_theme::warp::site_routes(
-        web::routes(with_store(store.clone())).or(api::routes(with_store(store))),
+        web::routes(sigma_theme::warp::with_state(store.clone()))
+            .or(api::routes(sigma_theme::warp::with_state(store))),
         sigma_pg::health::warp::health_routes("catalog", Some(health_pool)),
     )
     .with(warp::reply::with::headers(security_header_map()))

@@ -33,13 +33,16 @@ impl CatalogStore {
         &self.pool
     }
 
+    /// Every SKU by code, capped at [`sigma_pg::list::LIST_LIMIT`] rows.
     pub async fn list(&self) -> Result<Vec<Sku>, StoreError> {
         let rows = sqlx::query(
             "SELECT id, sku_code, name, description, category, kind, active, updated_at \
-             FROM catalog.skus ORDER BY lower(sku_code)",
+             FROM catalog.skus ORDER BY lower(sku_code) LIMIT $1",
         )
+        .bind(sigma_pg::list::LIST_LIMIT)
         .fetch_all(&self.pool)
         .await?;
+        sigma_pg::list::warn_if_at_limit("SKUs", rows.len());
         self.rows_to_skus(rows).await
     }
 
@@ -231,34 +234,37 @@ impl CatalogStore {
         Ok(())
     }
 
+    /// Whether making `components` part of `root_id` would close a loop, i.e.
+    /// whether `root_id` is already reachable from any of them.
+    ///
+    /// Walks only the part of the component graph reachable from the candidates
+    /// rather than reading every edge in the catalog: the recursive term follows
+    /// one level of `sku_components` at a time and `UNION` drops repeats, so the
+    /// walk also terminates on a graph that somehow already contains a cycle.
     async fn would_cycle(
         &self,
         root_id: &str,
         components: &[SkuComponent],
     ) -> Result<bool, StoreError> {
-        let graph = self.component_graph().await?;
-        let mut visited = HashSet::new();
-        for component in components {
-            if dfs_contains(&graph, &component.sku_id, root_id, &mut visited) {
-                return Ok(true);
-            }
+        if components.is_empty() {
+            return Ok(false);
         }
-        Ok(false)
-    }
-
-    async fn component_graph(&self) -> Result<HashMap<String, Vec<String>>, StoreError> {
-        let rows =
-            sqlx::query("SELECT parent_sku_id, component_sku_id FROM catalog.sku_components")
-                .fetch_all(&self.pool)
-                .await?;
-        let mut graph: HashMap<String, Vec<String>> = HashMap::new();
-        for row in rows {
-            graph
-                .entry(row.get("parent_sku_id"))
-                .or_default()
-                .push(row.get("component_sku_id"));
-        }
-        Ok(graph)
+        let candidates: Vec<String> = components.iter().map(|c| c.sku_id.clone()).collect();
+        let reaches_root: bool = sqlx::query_scalar(
+            "WITH RECURSIVE reachable(sku_id) AS ( \
+                 SELECT unnest($1::text[]) \
+               UNION \
+                 SELECT c.component_sku_id \
+                 FROM catalog.sku_components c \
+                 JOIN reachable r ON c.parent_sku_id = r.sku_id \
+             ) \
+             SELECT EXISTS (SELECT 1 FROM reachable WHERE sku_id = $2)",
+        )
+        .bind(&candidates)
+        .bind(root_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(reaches_root)
     }
 }
 
@@ -327,28 +333,6 @@ fn row_to_sku(
         components,
         updated_at: row.get("updated_at"),
     })
-}
-
-fn dfs_contains(
-    graph: &HashMap<String, Vec<String>>,
-    current: &str,
-    target: &str,
-    visited: &mut HashSet<String>,
-) -> bool {
-    if current == target {
-        return true;
-    }
-    if !visited.insert(current.to_string()) {
-        return false;
-    }
-    if let Some(children) = graph.get(current) {
-        for child in children {
-            if dfs_contains(graph, child, target, visited) {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 #[cfg(test)]
@@ -476,5 +460,102 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, StoreError::SelfReference));
+    }
+
+    #[tokio::test]
+    async fn reject_a_cycle_through_an_intermediate_composite() {
+        let store = test_store().await;
+        let part = store.create(simple("PART-C", "Part C")).await.unwrap();
+        let composite = |sku_code: &str, name: &str, component: &str| CreateSku {
+            sku_code: sku_code.to_string(),
+            name: name.to_string(),
+            description: None,
+            category: None,
+            kind: SkuKind::Composite,
+            active: Some(true),
+            components: vec![SkuComponent {
+                sku_id: component.to_string(),
+                quantity: 1,
+            }],
+        };
+        // INNER contains PART-C; OUTER contains INNER.
+        let inner = store
+            .create(composite("KIT-INNER", "Inner kit", &part.id))
+            .await
+            .unwrap();
+        let outer = store
+            .create(composite("KIT-OUTER", "Outer kit", &inner.id))
+            .await
+            .unwrap();
+
+        // Making OUTER a component of INNER closes the loop two levels up, so
+        // it must be refused even though neither sku references itself.
+        let err = store
+            .update(
+                &inner.id,
+                UpdateSku {
+                    sku_code: inner.sku_code,
+                    name: inner.name,
+                    description: None,
+                    category: None,
+                    kind: SkuKind::Composite,
+                    active: true,
+                    components: vec![SkuComponent {
+                        sku_id: outer.id.clone(),
+                        quantity: 1,
+                    }],
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StoreError::CycleDetected), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn accept_a_shared_component_that_closes_no_loop() {
+        let store = test_store().await;
+        let part = store.create(simple("PART-D", "Part D")).await.unwrap();
+        let other = store.create(simple("PART-E", "Part E")).await.unwrap();
+        let kit = store
+            .create(CreateSku {
+                sku_code: "KIT-DIAMOND".to_string(),
+                name: "Diamond kit".to_string(),
+                description: None,
+                category: None,
+                kind: SkuKind::Composite,
+                active: Some(true),
+                components: vec![SkuComponent {
+                    sku_id: part.id.clone(),
+                    quantity: 1,
+                }],
+            })
+            .await
+            .unwrap();
+
+        let updated = store
+            .update(
+                &kit.id,
+                UpdateSku {
+                    sku_code: kit.sku_code,
+                    name: kit.name,
+                    description: None,
+                    category: None,
+                    kind: SkuKind::Composite,
+                    active: true,
+                    components: vec![
+                        SkuComponent {
+                            sku_id: part.id,
+                            quantity: 1,
+                        },
+                        SkuComponent {
+                            sku_id: other.id,
+                            quantity: 3,
+                        },
+                    ],
+                },
+            )
+            .await
+            .expect("two unrelated parts are not a cycle");
+        assert_eq!(updated.components.len(), 2);
     }
 }

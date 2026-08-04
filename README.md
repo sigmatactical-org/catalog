@@ -88,19 +88,41 @@ Browser clients call `/api/skus` on the identity host (with session + CSRF); ide
 ## Development
 
 ```bash
-./scripts/prepare-local.sh
 cargo run -p sigma-catalog
 ```
 
 From the sigma workspace:
 
 ```bash
-cd sigma/it/catalog && ./scripts/prepare-local.sh && cargo run -p sigma-catalog
-# or prepare all commerce services:
-(cd sigma/it && ./scripts/prepare-commerce-local.sh)
+cd sigma/it/catalog && cargo run -p sigma-catalog
+# when editing a shared crate, link it into every commerce service first:
+(cd sigma/it/platform && ./scripts/link-commerce-local.sh)
 ```
 
 Open http://localhost:8080
+
+### Shared crates
+
+`sigma-theme` and `sigma-pg` are pinned git dependencies, so a
+fresh clone builds with nothing but `cargo`: the revision in `Cargo.toml` is
+fetched, and `build.rs` writes the `askama.toml` that points at sigma-theme's
+templates wherever Cargo put them.
+
+When one of those crates is checked out beside this repo and you are editing it,
+link the checkouts so your edits are picked up without a push:
+
+```bash
+./scripts/prepare-local.sh
+```
+
+That writes `[patch]` entries into `.cargo/config.toml` (gitignored) for the
+crates it finds and leaves the rest on their pinned revision; it prints what it
+linked. Undo by deleting the file. Note that building against a linked checkout
+rewrites `Cargo.lock` into path form — don't commit that; `platform`'s
+`scripts/relock.sh` restores the git-resolved lockfile CI expects.
+
+Bumping a shared crate is `platform/scripts/pin-shared-revs.sh <crate>` after
+that crate is pushed, which updates every consumer's pin at once.
 
 ## Docker
 
