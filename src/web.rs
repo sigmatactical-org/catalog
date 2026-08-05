@@ -2,12 +2,53 @@ use std::convert::Infallible;
 
 use sigma_theme::warp::internal_rejection;
 use warp::http::StatusCode;
+use warp::reply::Response;
 use warp::{Filter, Rejection, Reply};
 
 use crate::SharedStore;
+use crate::config;
 use crate::model::{Sku, SkuForm};
+use crate::session_status;
 use crate::store::StoreError;
 use crate::templates::{self, FormValues};
+
+/// Outcome of the admin session gate for HTML admin routes.
+enum AdminGate {
+    Allow,
+    SignIn(Response),
+    /// Signed in but not an admin — hide the admin surface.
+    Deny,
+}
+
+/// Require an admin identity session. Anonymous users are sent to sign-in;
+/// signed-in non-admins get a 404 so the catalog UI stays private.
+async fn require_admin(cookie: Option<&str>, return_path: &str) -> AdminGate {
+    match session_status::fetch_identity_status(cookie).await {
+        Some(status) if status.is_admin => AdminGate::Allow,
+        Some(_) => AdminGate::Deny,
+        None => AdminGate::SignIn(sign_in_redirect(return_path)),
+    }
+}
+
+fn sign_in_redirect(return_path: &str) -> Response {
+    let links = sigma_identity_nav::auth_links(
+        &config::identity_public_base_url(),
+        &config::public_base_url(),
+        return_path,
+    );
+    match links.sign_in_url.parse::<warp::http::Uri>() {
+        Ok(uri) => warp::redirect::see_other(uri).into_response(),
+        Err(_) => warp::reply::with_status(
+            warp::reply::html(sigma_theme::errors::internal_server_error_html()),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )
+        .into_response(),
+    }
+}
+
+fn cookie_filter() -> impl Filter<Extract = (Option<String>,), Error = Rejection> + Clone {
+    warp::header::optional::<String>("cookie")
+}
 
 /// Build this module's routes.
 pub fn routes(
@@ -26,14 +67,20 @@ fn index_page(
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone + Send + 'static {
     warp::path::end()
         .and(warp::get())
+        .and(cookie_filter())
         .and(store)
-        .and_then(|store: SharedStore| async move {
+        .and_then(|cookie: Option<String>, store: SharedStore| async move {
+            match require_admin(cookie.as_deref(), "/").await {
+                AdminGate::Allow => {}
+                AdminGate::SignIn(resp) => return Ok::<_, Rejection>(resp),
+                AdminGate::Deny => return Err(warp::reject::not_found()),
+            }
             let skus = store
                 .list()
                 .await
                 .map_err(|e| internal_rejection("list SKUs", e))?;
             templates::render_index_html(skus, None)
-                .map(warp::reply::html)
+                .map(|html| warp::reply::html(html).into_response())
                 .map_err(|e| internal_rejection("render SKU index", e))
         })
 }
@@ -45,8 +92,14 @@ fn new_sku_page(
         .and(warp::path("new"))
         .and(warp::path::end())
         .and(warp::get())
+        .and(cookie_filter())
         .and(store)
-        .and_then(|store: SharedStore| async move {
+        .and_then(|cookie: Option<String>, store: SharedStore| async move {
+            match require_admin(cookie.as_deref(), "/skus/new").await {
+                AdminGate::Allow => {}
+                AdminGate::SignIn(resp) => return Ok::<_, Rejection>(resp),
+                AdminGate::Deny => return Err(warp::reject::not_found()),
+            }
             // The form offers every other SKU as a component, so the list is
             // needed even when creating.
             let skus = store
@@ -54,7 +107,7 @@ fn new_sku_page(
                 .await
                 .map_err(|e| internal_rejection("list SKUs", e))?;
             templates::render_form_html(skus, None, None)
-                .map(warp::reply::html)
+                .map(|html| warp::reply::html(html).into_response())
                 .map_err(|e| internal_rejection("render SKU form", e))
         })
 }
@@ -65,10 +118,16 @@ fn create_sku_form(
     warp::path("skus")
         .and(warp::path::end())
         .and(warp::post())
+        .and(cookie_filter())
         .and(warp::body::form())
         .and(store)
         .and_then(
-            |pairs: Vec<(String, String)>, store: SharedStore| async move {
+            |cookie: Option<String>, pairs: Vec<(String, String)>, store: SharedStore| async move {
+                match require_admin(cookie.as_deref(), "/skus/new").await {
+                    AdminGate::Allow => {}
+                    AdminGate::SignIn(resp) => return Ok::<_, Rejection>(resp),
+                    AdminGate::Deny => return Err(warp::reject::not_found()),
+                }
                 let form = SkuForm::from_pairs(&pairs);
                 let skus = store
                     .list()
@@ -93,15 +152,22 @@ fn edit_sku_page(
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone + Send + 'static {
     warp::path!("skus" / String / "edit")
         .and(warp::get())
+        .and(cookie_filter())
         .and(store)
-        .and_then(|id: String, store: SharedStore| async move {
+        .and_then(|id: String, cookie: Option<String>, store: SharedStore| async move {
+            let return_path = format!("/skus/{id}/edit");
+            match require_admin(cookie.as_deref(), &return_path).await {
+                AdminGate::Allow => {}
+                AdminGate::SignIn(resp) => return Ok::<_, Rejection>(resp),
+                AdminGate::Deny => return Err(warp::reject::not_found()),
+            }
             let (sku, skus) = tokio::join!(store.get(&id), store.list());
             let Some(sku) = sku.map_err(|e| internal_rejection("read SKU", e))? else {
                 return Err(warp::reject::not_found());
             };
             let skus = skus.map_err(|e| internal_rejection("list SKUs", e))?;
             templates::render_form_html(skus, Some(sku), None)
-                .map(warp::reply::html)
+                .map(|html| warp::reply::html(html).into_response())
                 .map_err(|e| internal_rejection("render SKU form", e))
         })
 }
@@ -111,10 +177,17 @@ fn update_sku_form(
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone + Send + 'static {
     warp::path!("skus" / String / "edit")
         .and(warp::post())
+        .and(cookie_filter())
         .and(warp::body::form())
         .and(store)
         .and_then(
-            |id: String, pairs: Vec<(String, String)>, store: SharedStore| async move {
+            |id: String, cookie: Option<String>, pairs: Vec<(String, String)>, store: SharedStore| async move {
+                let return_path = format!("/skus/{id}/edit");
+                match require_admin(cookie.as_deref(), &return_path).await {
+                    AdminGate::Allow => {}
+                    AdminGate::SignIn(resp) => return Ok::<_, Rejection>(resp),
+                    AdminGate::Deny => return Err(warp::reject::not_found()),
+                }
                 let form = SkuForm::from_pairs(&pairs);
                 // Every error path re-renders the edit form, which needs both
                 // the SKU list and the SKU itself: fetch them once up front.
@@ -140,8 +213,14 @@ fn delete_sku_form(
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone + Send + 'static {
     warp::path!("skus" / String / "delete")
         .and(warp::post())
+        .and(cookie_filter())
         .and(store)
-        .and_then(|id: String, store: SharedStore| async move {
+        .and_then(|id: String, cookie: Option<String>, store: SharedStore| async move {
+            match require_admin(cookie.as_deref(), "/").await {
+                AdminGate::Allow => {}
+                AdminGate::SignIn(resp) => return Ok::<_, Rejection>(resp),
+                AdminGate::Deny => return Err(warp::reject::not_found()),
+            }
             match store.delete(&id).await {
                 Ok(()) => {
                     Ok(warp::redirect::redirect(warp::http::Uri::from_static("/")).into_response())

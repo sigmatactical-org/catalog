@@ -24,6 +24,18 @@ pub fn identity_public_origin() -> String {
     sigma_config::origin_of(&identity_public_base_url())
 }
 
+/// Base URL for server-to-server calls to the identity BFF (e.g. session
+/// status checks on HTML admin routes). Must be reachable from this pod,
+/// unlike `identity_public_base_url`, which is the browser-facing ingress
+/// host and does not resolve back to identity from inside the cluster
+/// network. Falls back to the public URL for non-cluster local dev.
+#[must_use]
+pub fn identity_internal_base_url() -> String {
+    SERVICE
+        .opt_url("IDENTITY_INTERNAL_URL")
+        .unwrap_or_else(identity_public_base_url)
+}
+
 /// PostgreSQL connection URL (shared Sigma database).
 #[must_use]
 pub fn database_url() -> String {

@@ -5,6 +5,7 @@
 mod api;
 pub mod config;
 mod model;
+mod session_status;
 pub mod store;
 mod templates;
 mod web;
@@ -119,16 +120,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn index_lists_skus() {
+    async fn index_without_session_redirects_to_sign_in() {
         let res = warp::test::request()
             .method("GET")
             .path("/")
             .reply(&routes(test_store().await))
             .await;
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = std::str::from_utf8(res.body()).unwrap();
-        assert!(body.contains("Catalog"));
-        assert!(body.contains("id=\"store-nav-auth\""));
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        let location = res
+            .headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert!(location.contains("/auth/login"));
     }
 
     #[tokio::test]
@@ -201,7 +205,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn web_form_creates_composite_and_index_lists_components() {
+    async fn api_create_composite_and_list_includes_components() {
         let store = test_store().await;
         let app = routes(store);
 
@@ -217,60 +221,72 @@ mod tests {
             .await;
         let part: Sku = serde_json::from_slice(part_res.body()).unwrap();
 
-        let res = warp::test::request()
-            .method("POST")
-            .path("/skus")
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(format!(
-                "sku_code=KIT-02&name=Form+kit&description=&category=&kind=composite&active=on&component={id}&qty_{id}=3",
-                id = part.id
-            ))
-            .reply(&app)
-            .await;
-        assert!(
-            res.status().is_redirection(),
-            "expected redirect, got {} — {}",
-            res.status(),
-            std::str::from_utf8(res.body()).unwrap_or("")
-        );
-
-        let index = warp::test::request()
-            .method("GET")
-            .path("/")
-            .reply(&app)
-            .await;
-        let body = std::str::from_utf8(index.body()).unwrap();
-        assert!(body.contains("KIT-02"));
-        assert!(body.contains("PART-B"));
-        assert!(body.contains("Part B"));
-        assert!(body.contains("× 3"));
-    }
-
-    #[tokio::test]
-    async fn form_page_offers_component_checkboxes() {
-        let store = test_store().await;
-        let app = routes(store);
-
-        warp::test::request()
+        let kit_res = warp::test::request()
             .method("POST")
             .path("/skus")
             .header("content-type", "application/json")
             .header("x-sigma-internal-token", sigma_pg::clients::internal::TEST_INTERNAL_TOKEN)
-            .body(
-                r#"{"sku_code":"PART-C","name":"Part C","description":null,"category":null,"kind":"simple","active":true,"components":[]}"#,
-            )
+            .body(format!(
+                r#"{{"sku_code":"KIT-02","name":"Form kit","description":null,"category":null,"kind":"composite","active":true,"components":[{{"sku_id":"{}","quantity":3}}]}}"#,
+                part.id
+            ))
             .reply(&app)
             .await;
+        assert_eq!(kit_res.status(), StatusCode::CREATED);
+        let kit: Sku = serde_json::from_slice(kit_res.body()).unwrap();
+        assert_eq!(kit.sku_code, "KIT-02");
+        assert_eq!(kit.components.len(), 1);
+        assert_eq!(kit.components[0].quantity, 3);
+
+        let list_res = warp::test::request()
+            .method("GET")
+            .path("/skus")
+            .header("accept", "application/json")
+            .header("x-sigma-internal-token", sigma_pg::clients::internal::TEST_INTERNAL_TOKEN)
+            .reply(&app)
+            .await;
+        assert_eq!(list_res.status(), StatusCode::OK);
+        let skus: Vec<Sku> = serde_json::from_slice(list_res.body()).unwrap();
+        let listed_kit = skus.iter().find(|s| s.sku_code == "KIT-02").unwrap();
+        assert_eq!(listed_kit.components.len(), 1);
+        assert_eq!(listed_kit.components[0].sku_id, part.id);
+    }
+
+    #[tokio::test]
+    async fn web_form_post_without_session_redirects_to_sign_in() {
+        let app = routes(test_store().await);
+
+        let res = warp::test::request()
+            .method("POST")
+            .path("/skus")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body("sku_code=KIT-03&name=Form+kit&description=&category=&kind=simple&active=on")
+            .reply(&app)
+            .await;
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        let location = res
+            .headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert!(location.contains("/auth/login"));
+    }
+
+    #[tokio::test]
+    async fn new_sku_page_without_session_redirects_to_sign_in() {
+        let app = routes(test_store().await);
 
         let res = warp::test::request()
             .method("GET")
             .path("/skus/new")
             .reply(&app)
             .await;
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = std::str::from_utf8(res.body()).unwrap();
-        assert!(body.contains(r#"name="component""#));
-        assert!(body.contains("PART-C"));
-        assert!(body.contains("Part C"));
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        let location = res
+            .headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert!(location.contains("/auth/login"));
     }
 }
